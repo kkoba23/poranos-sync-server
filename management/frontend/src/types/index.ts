@@ -77,6 +77,9 @@ export interface Device {
   sync_room?: string
   sync_client_id?: number
   sync_connected_via?: string
+  storage_used_gb?: number
+  storage_total_gb?: number
+  app_account?: string
   webrtc_available: boolean
 }
 
@@ -101,4 +104,13 @@ export interface DeviceStream {
   deviceId: string
   stream: MediaStream | null
   state: 'connecting' | 'connected' | 'disconnected' | 'failed'
+}
+
+export interface AppRelease {
+  id: number
+  version: string
+  file_name: string
+  download_url?: string
+  notes?: string
+  created_at?: string
 }

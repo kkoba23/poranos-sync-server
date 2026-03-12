@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useScrcpyStream } from '@/composables/useScrcpyStream'
+import { useAuthStore } from '@/stores/authStore'
+import { post } from '@/api/client'
 import ConfirmModal from '@/components/ConfirmModal.vue'
 import type { Device } from '@/types'
 
@@ -10,6 +12,8 @@ const props = withDefaults(defineProps<{
 }>(), {
   compact: false
 })
+
+const authStore = useAuthStore()
 
 const canvasRef = ref<HTMLCanvasElement | null>(null)
 const { state, connect, disconnect } = useScrcpyStream()
@@ -23,10 +27,55 @@ function batteryColor(level?: number): string {
   return 'var(--danger)'
 }
 
+const syncViaType = computed(() => {
+  const via = props.device.sync_connected_via || ''
+  return via.includes('localhost') ? 'local' : 'remote'
+})
+
 const syncViaLabel = computed(() => {
   const via = props.device.sync_connected_via || ''
   return via.includes('localhost') ? 'adb reverse' : 'WiFi direct'
 })
+
+const storageColor = computed(() => {
+  const used = props.device.storage_used_gb
+  const total = props.device.storage_total_gb
+  if (used == null || total == null || total === 0) return 'var(--text-secondary)'
+  const pct = used / total * 100
+  if (pct > 90) return 'var(--danger)'
+  if (pct > 75) return 'var(--warning)'
+  return 'var(--success)'
+})
+
+const isAccountSame = computed(() => {
+  if (!authStore.userEmail || !props.device.app_account) return false
+  return props.device.app_account === authStore.userEmail
+})
+
+const accountError = ref('')
+
+async function accountChange() {
+  const email = authStore.userEmail
+  if (!email) {
+    accountError.value = 'Management UIにログインしてください'
+    return
+  }
+  const room = props.device.sync_room || ''
+  const clientId = props.device.sync_client_id || 0
+  if (!room || !clientId) {
+    accountError.value = 'デバイスがSync Serverに接続されていません'
+    return
+  }
+  try {
+    await post('/api/remote/command', {
+      room_name: room,
+      command: 'change_account',
+      params: { email, target_client_id: clientId },
+    })
+  } catch (e: any) {
+    accountError.value = `アカウント設定に失敗しました: ${e.message}`
+  }
+}
 
 // 音量制御
 const localVolume = ref(props.device.volume_music ?? 0)
@@ -70,21 +119,6 @@ async function stopApp() {
   const serial = props.device.adb_serial || props.device.serial
   try {
     await fetch(`/api/devices/${encodeURIComponent(serial)}/stop`, { method: 'POST' })
-  } catch { /* ignore */ }
-}
-
-async function toggleSleep() {
-  const serial = props.device.adb_serial || props.device.serial
-  const action = props.device.wakefulness === 'Awake' ? 'sleep' : 'wake'
-  try {
-    await fetch(`/api/devices/${encodeURIComponent(serial)}/${action}`, { method: 'POST' })
-  } catch { /* ignore */ }
-}
-
-async function sendMenu() {
-  const serial = props.device.adb_serial || props.device.serial
-  try {
-    await fetch(`/api/devices/${encodeURIComponent(serial)}/menu`, { method: 'POST' })
   } catch { /* ignore */ }
 }
 
@@ -138,8 +172,13 @@ watch(() => props.device.serial, () => {
       <svg v-if="device.connection_type === 'wifi'" class="wifi-icon" width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
         <path d="M1 9l2 2c4.97-4.97 13.03-4.97 18 0l2-2C16.93 2.93 7.08 2.93 1 9zm8 8l3 3 3-3c-1.65-1.66-4.34-1.66-6 0zm-4-4l2 2c2.76-2.76 7.24-2.76 10 0l2-2C15.14 9.14 8.87 9.14 5 13z"/>
       </svg>
-      <span v-if="state.connected" class="status-dot connected"></span>
-      <span v-else class="status-dot"></span>
+      <span v-if="state.connected" class="status-dot connected" title="Stream"></span>
+      <span v-else class="status-dot" title="Stream"></span>
+      <span
+        class="status-dot"
+        :class="device.sync_connected ? 'sync-on' : 'sync-off'"
+        title="Sync Server"
+      ></span>
 
       <div class="header-spacer"></div>
 
@@ -195,13 +234,26 @@ watch(() => props.device.serial, () => {
       <!-- Device info overlay -->
       <div class="device-info-overlay" :class="{ open: showDeviceInfo }">
         <div class="info-row">
-          <span class="info-label">Battery</span>
+          <span class="info-label">Device</span>
+          <span class="info-value">{{ device.model }}</span>
+        </div>
+        <div class="info-row" v-if="device.battery_level != null">
+          <span class="info-label">Head Battery</span>
           <span class="info-value" :style="{ color: batteryColor(device.battery_level) }">
-            {{ device.battery_level != null ? `${device.battery_level}%` : '—' }}
+            {{ device.battery_level }}%
+            <template v-if="device.battery_plugged">
+              <span
+                class="charger-badge"
+                :class="device.battery_weak_charger === false ? 'fast' : 'slow'"
+                :title="device.battery_charging_ma ? `${device.battery_charging_ma}mA` : ''"
+              >
+                &#x26A1;{{ device.battery_weak_charger === false ? 'Fast' : 'Slow' }}
+              </span>
+            </template>
           </span>
         </div>
         <div class="info-row" v-if="device.controller_left_battery != null || device.controller_right_battery != null">
-          <span class="info-label">Controllers</span>
+          <span class="info-label">Controller Batteries</span>
           <span class="info-value controller-batteries">
             <span v-if="device.controller_left_battery != null" :style="{ color: batteryColor(device.controller_left_battery) }">
               L:{{ device.controller_left_battery }}%
@@ -223,35 +275,44 @@ watch(() => props.device.serial, () => {
         </div>
         <div class="info-row">
           <span class="info-label">App</span>
-          <span class="info-value" :style="{ color: device.app_running ? 'var(--success)' : 'var(--text-secondary)' }">
-            {{ device.app_running ? 'Running' : device.app_installed ? 'Stopped' : 'Not installed' }}
-            <template v-if="device.app_installed && device.app_version"> v{{ device.app_version }}</template>
+          <span class="info-value">
+            {{ device.app_installed ? `v${device.app_version || '?'}` : 'Not installed' }}
           </span>
         </div>
-        <div class="info-row" v-if="device.wakefulness">
-          <span class="info-label">Headset</span>
-          <span class="info-value" :style="{ color: device.wakefulness === 'Awake' ? 'var(--success)' : 'var(--text-secondary)' }">
-            {{ device.wakefulness }}
-            <button
-              class="sleep-btn"
-              :disabled="device.status !== 'device'"
-              @click="toggleSleep"
-            >{{ device.wakefulness === 'Awake' ? 'Sleep' : 'Awake' }}</button>
+        <div class="info-row">
+          <span class="info-label">Poranos_LT</span>
+          <span class="info-value" :style="{ color: device.app_running ? 'var(--success)' : 'var(--text-secondary)' }">
+            {{ device.app_running ? 'Running' : 'Stopped' }}
+          </span>
+        </div>
+        <div class="info-row" v-if="device.app_account">
+          <span class="info-label">Account</span>
+          <span class="info-value account-value" :title="device.app_account">{{ device.app_account }}</span>
+        </div>
+        <div class="info-row" v-if="device.storage_total_gb != null">
+          <span class="info-label">Storage</span>
+          <span class="info-value">
+            <span :style="{ color: storageColor }">{{ device.storage_used_gb }}GB</span>
+            <span style="color: var(--text-secondary)"> / {{ device.storage_total_gb }}GB</span>
           </span>
         </div>
         <div class="info-row">
           <span class="info-label">Sync</span>
           <span class="info-value" :style="{ color: device.sync_connected ? 'var(--success)' : 'var(--text-secondary)' }">
-            {{ device.sync_connected ? `Connected (${syncViaLabel})` : 'Disconnected' }}
+            <template v-if="device.sync_connected">
+              Connected
+              <span class="sync-via-badge" :class="syncViaType">{{ syncViaLabel }}</span>
+            </template>
+            <template v-else>Disconnected</template>
           </span>
         </div>
         <div class="overlay-actions">
           <button
-            class="btn btn-secondary btn-xs"
-            :disabled="device.status !== 'device'"
-            @click="sendMenu"
-            title="Send Meta button (toggle menu)"
-          >Menu</button>
+            class="btn btn-account btn-xs"
+            :disabled="!device.sync_connected || isAccountSame"
+            :title="isAccountSame ? 'Already set to this account' : 'Set account from logged-in user'"
+            @click="accountChange"
+          >Account Change</button>
           <button
             class="btn btn-warning btn-xs"
             :disabled="device.status !== 'device'"
@@ -277,6 +338,17 @@ watch(() => props.device.serial, () => {
       confirm-class="btn-warning"
       @confirm="showRebootConfirm = false; rebootDevice()"
       @cancel="showRebootConfirm = false"
+    />
+
+    <ConfirmModal
+      v-if="accountError"
+      title="通知"
+      :message="accountError"
+      confirm-label="OK"
+      confirm-class="btn-primary"
+      hide-cancel
+      @confirm="accountError = ''"
+      @cancel="accountError = ''"
     />
   </div>
 </template>
@@ -340,6 +412,12 @@ watch(() => props.device.serial, () => {
 }
 .status-dot.connected {
   background: #22c55e;
+}
+.status-dot.sync-on {
+  background: var(--primary, #4a9eff);
+}
+.status-dot.sync-off {
+  background: var(--text-secondary, #666);
 }
 .header-spacer {
   flex: 1;
@@ -474,26 +552,43 @@ watch(() => props.device.serial, () => {
   display: flex;
   gap: 0.5rem;
 }
-.sleep-btn {
-  margin-left: 0.3rem;
+.charger-badge {
+  margin-left: 0.2rem;
   font-size: 0.55rem;
-  font-weight: 600;
-  padding: 0.05rem 0.3rem;
+  font-weight: 700;
+  padding: 0.02rem 0.25rem;
   border-radius: 3px;
-  border: 1px solid rgba(255, 255, 255, 0.2);
-  background: transparent;
-  color: var(--text);
-  cursor: pointer;
   vertical-align: middle;
 }
-.sleep-btn:hover:not(:disabled) {
-  background: var(--primary);
+.charger-badge.fast {
+  background: var(--success, #4caf50);
   color: #fff;
-  border-color: var(--primary);
 }
-.sleep-btn:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
+.charger-badge.slow {
+  background: var(--warning, #ff9800);
+  color: #1a1a2e;
+}
+.sync-via-badge {
+  margin-left: 0.2rem;
+  font-size: 0.55rem;
+  font-weight: 700;
+  padding: 0.02rem 0.25rem;
+  border-radius: 3px;
+  vertical-align: middle;
+}
+.sync-via-badge.local {
+  background: var(--primary, #4a9eff);
+  color: #fff;
+}
+.sync-via-badge.remote {
+  background: var(--warning, #ff9800);
+  color: #1a1a2e;
+}
+.account-value {
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .overlay-actions {
   display: flex;
@@ -506,6 +601,18 @@ watch(() => props.device.serial, () => {
   font-size: 0.65rem;
   padding: 0.2rem 0.4rem;
   border-radius: 4px;
+}
+.btn-account {
+  background: var(--accent, #8b5cf6);
+  color: #fff;
+  border-color: var(--accent, #8b5cf6);
+}
+.btn-account:hover:not(:disabled) {
+  opacity: 0.85;
+}
+.btn-account:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
 }
 .info-toggle-btn {
   display: flex;

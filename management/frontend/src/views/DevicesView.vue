@@ -2,46 +2,36 @@
 import { ref, computed } from 'vue'
 import DeviceList from '@/components/devices/DeviceList.vue'
 import ApkUploader from '@/components/devices/ApkUploader.vue'
+import ApkReleaseInstaller from '@/components/devices/ApkReleaseInstaller.vue'
 import ConfirmModal from '@/components/ConfirmModal.vue'
 import { useDevices } from '@/composables/useDevices'
+import { useAuthStore } from '@/stores/authStore'
+import { post, proxyPost } from '@/api/client'
 
-const { devices, installTasks, connected, launchApp, launchAll, stopApp, stopAll, cancelInstall, rebootDevice, rebootAll, sendKeyevent } = useDevices()
+const { devices, installTasks, connected, launchApp, stopApp, cancelInstall, rebootDevice, rebootAll } = useDevices()
+const authStore = useAuthStore()
 const selectedFile = ref<File | null>(null)
-const launching = ref(false)
-const stopping = ref(false)
 const rebooting = ref(false)
 const showRebootAllConfirm = ref(false)
 const uploadProgress = ref<number | null>(null)
+const notifyMessage = ref('')
 
-// Master volume control
-const masterVolume = ref(9)
-const applyingVolume = ref(false)
+// Install tab: 'release' (poranos.com) or 'manual' (local APK file)
+const installTab = ref<'release' | 'manual'>('release')
+const releaseInstallerRef = ref<InstanceType<typeof ApkReleaseInstaller>>()
 
-async function onApplyVolume() {
-  applyingVolume.value = true
-  try {
-    await setAllVolumes(masterVolume.value)
-  } finally {
-    applyingVolume.value = false
-  }
-}
-
-async function setAllVolumes(volume: number) {
-  const activeDevices = devices.value.filter(d => d.status === 'device')
-  await Promise.all(activeDevices.map(d => {
-    const serial = d.adb_serial || d.serial
-    return fetch(`/api/devices/${encodeURIComponent(serial)}/volume`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ volume }),
-    }).catch(() => {})
-  }))
-}
-
-const installing = computed(() =>
+const anyInstalling = computed(() =>
   uploadProgress.value != null ||
   Array.from(installTasks.value.values()).some(t => t.status === 'queued' || t.status === 'installing')
 )
+
+const canInstallOnDevice = computed(() => {
+  if (anyInstalling.value) return false
+  if (installTab.value === 'release') {
+    return !!releaseInstallerRef.value?.latestRelease
+  }
+  return !!selectedFile.value
+})
 
 function onFileSelected(file: File) {
   selectedFile.value = file
@@ -70,7 +60,7 @@ function uploadApk<T>(url: string, file: File): Promise<T> {
   })
 }
 
-async function onInstall(serial: string) {
+async function onManualInstall(serial: string) {
   if (!selectedFile.value) return
   uploadProgress.value = 0
   try {
@@ -81,7 +71,7 @@ async function onInstall(serial: string) {
   }
 }
 
-async function onInstallAll() {
+async function onManualInstallAll() {
   if (!selectedFile.value) return
   uploadProgress.value = 0
   try {
@@ -94,21 +84,21 @@ async function onInstallAll() {
   }
 }
 
-async function onLaunchAll() {
-  launching.value = true
-  try {
-    await launchAll()
-  } finally {
-    launching.value = false
-  }
-}
-
-async function onStopAll() {
-  stopping.value = true
-  try {
-    await stopAll()
-  } finally {
-    stopping.value = false
+async function onDeviceInstall(serial: string) {
+  if (installTab.value === 'release') {
+    const latest = releaseInstallerRef.value?.latestRelease
+    if (!latest) {
+      notifyMessage.value = 'リリースが見つかりません。Refreshしてください'
+      return
+    }
+    try {
+      const task = await proxyPost<any>(`/api/poranos/releases/${latest.id}/install/${encodeURIComponent(serial)}`)
+      installTasks.value.set(task.task_id, task)
+    } catch (e: any) {
+      notifyMessage.value = `インストール失敗: ${e.message}`
+    }
+  } else {
+    await onManualInstall(serial)
   }
 }
 
@@ -120,84 +110,110 @@ async function onRebootAll() {
     rebooting.value = false
   }
 }
+
+function onReleaseTasks(tasks: any[]) {
+  for (const task of tasks) {
+    installTasks.value.set(task.task_id, task)
+  }
+}
+
+async function onAccountChange(_serial: string, room: string, clientId: number) {
+  const email = authStore.userEmail
+  if (!email) {
+    notifyMessage.value = 'Management UIにログインしてください'
+    return
+  }
+  if (!room || !clientId) {
+    notifyMessage.value = 'デバイスがSync Serverに接続されていません'
+    return
+  }
+  try {
+    await post('/api/remote/command', {
+      room_name: room,
+      command: 'change_account',
+      params: { email, target_client_id: clientId },
+    })
+  } catch (e: any) {
+    notifyMessage.value = `アカウント設定に失敗しました: ${e.message}`
+  }
+}
 </script>
 
 <template>
   <div>
     <div class="flex items-center justify-between mb-1">
       <h1 class="page-title">Devices</h1>
-      <span :style="{ color: connected ? 'var(--success)' : 'var(--danger)' }">
-        {{ connected ? 'Live' : 'Disconnected' }}
-      </span>
+      <div class="flex items-center" style="gap: 0.75rem">
+        <button
+          class="btn btn-warning btn-sm"
+          :disabled="devices.length === 0 || rebooting"
+          @click="showRebootAllConfirm = true"
+        >
+          {{ rebooting ? 'Rebooting...' : 'Reboot All' }}
+        </button>
+        <span :style="{ color: connected ? 'var(--success)' : 'var(--danger)' }">
+          {{ connected ? 'Live' : 'Disconnected' }}
+        </span>
+      </div>
     </div>
 
-    <div class="card mb-1">
-      <div class="flex items-center justify-between">
-        <div class="card-title" style="margin: 0">App Control</div>
-        <div class="flex items-center" style="gap: 0.5rem">
-          <button
-            class="btn btn-success"
-            :disabled="devices.length === 0 || launching"
-            @click="onLaunchAll"
-          >
-            {{ launching ? 'Launching...' : 'Launch All' }}
-          </button>
-          <button
-            class="btn btn-danger"
-            :disabled="devices.length === 0 || stopping"
-            @click="onStopAll"
-          >
-            {{ stopping ? 'Stopping...' : 'Stop All' }}
-          </button>
-          <button
-            class="btn btn-warning"
-            :disabled="devices.length === 0 || rebooting"
-            @click="showRebootAllConfirm = true"
-          >
-            {{ rebooting ? 'Rebooting...' : 'Reboot All' }}
-          </button>
-        </div>
-      </div>
-      <div class="master-volume" v-if="devices.length > 0">
-        <div style="flex: 1"></div>
-        <span class="master-volume-label">All Volume</span>
-        <input
-          type="range"
-          class="master-volume-slider"
-          :min="0"
-          :max="15"
-          v-model.number="masterVolume"
-        />
-        <span class="master-volume-value">{{ masterVolume }}</span>
-        <button
-          class="btn btn-primary btn-sm"
-          :disabled="applyingVolume"
-          @click="onApplyVolume"
-        >
-          {{ applyingVolume ? '...' : 'Apply' }}
-        </button>
-      </div>
+    <!-- Install tabs -->
+    <div class="install-tabs">
+      <button
+        class="tab-btn"
+        :class="{ active: installTab === 'release' }"
+        @click="installTab = 'release'"
+      >
+        APK FROM PORANOS.COM
+      </button>
+      <button
+        class="tab-btn"
+        :class="{ active: installTab === 'manual' }"
+        @click="installTab = 'manual'"
+      >
+        APK INSTALLATION
+      </button>
     </div>
+
+    <ApkReleaseInstaller
+      v-show="installTab === 'release'"
+      ref="releaseInstallerRef"
+      :devices="devices"
+      :install-tasks="installTasks"
+      @release-tasks="onReleaseTasks"
+    />
 
     <ApkUploader
+      v-show="installTab === 'manual'"
       :has-devices="devices.length > 0"
-      :installing="installing"
+      :installing="anyInstalling"
       :upload-progress="uploadProgress"
       @file-selected="onFileSelected"
-      @install-all="onInstallAll"
+      @install-all="onManualInstallAll"
     />
 
     <DeviceList
       :devices="devices"
-      :selected-file="selectedFile"
-      :installing="installing"
+      :can-install="canInstallOnDevice"
       :install-tasks="installTasks"
-      @install="onInstall"
+      :user-email="authStore.userEmail || undefined"
+      @install="onDeviceInstall"
       @launch="(serial: string) => launchApp(serial)"
       @stop="(serial: string) => stopApp(serial)"
       @cancel-install="cancelInstall"
       @reboot="(serial: string) => rebootDevice(serial)"
-      @menu="(serial: string) => sendKeyevent(serial, 3)"
+      @account-change="onAccountChange"
+    />
+
+    <ConfirmModal
+      v-if="notifyMessage"
+      title="通知"
+      :message="notifyMessage"
+      confirm-label="OK"
+      confirm-class="btn-primary"
+      hide-cancel
+      @confirm="notifyMessage = ''"
+      @cancel="notifyMessage = ''"
     />
 
     <ConfirmModal
@@ -214,63 +230,37 @@ async function onRebootAll() {
 </template>
 
 <style scoped>
-.master-volume {
+.install-tabs {
   display: flex;
-  align-items: center;
-  gap: 0.75rem;
-  margin-top: 0.75rem;
-  padding-top: 0.75rem;
-  border-top: 1px solid var(--border, #333);
+  gap: 0;
+  margin-bottom: 0;
 }
-.master-volume-label {
+.tab-btn {
+  flex: 1;
+  padding: 0.5rem 1rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  border: 1px solid var(--border, #333);
+  background: transparent;
   color: var(--text-secondary);
-  font-size: 0.85rem;
-  flex-shrink: 0;
-}
-.master-volume-slider {
-  width: 200px;
-  height: 6px;
-  -webkit-appearance: none;
-  appearance: none;
-  background: var(--border, #444);
-  border-radius: 3px;
-  outline: none;
   cursor: pointer;
+  transition: all 0.15s;
 }
-.master-volume-slider::-webkit-slider-runnable-track {
-  height: 6px;
-  border-radius: 3px;
+.tab-btn:first-child {
+  border-radius: var(--radius, 6px) 0 0 0;
 }
-.master-volume-slider::-webkit-slider-thumb {
-  -webkit-appearance: none;
-  appearance: none;
-  width: 20px;
-  height: 20px;
-  border-radius: 50%;
-  background: var(--primary, #4a9eff);
-  border: 2px solid #fff;
-  cursor: pointer;
-  margin-top: -7px;
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
+.tab-btn:last-child {
+  border-radius: 0 var(--radius, 6px) 0 0;
+  border-left: none;
 }
-.master-volume-slider::-moz-range-track {
-  height: 6px;
-  background: var(--border, #444);
-  border-radius: 3px;
+.tab-btn.active {
+  background: var(--bg-secondary, #1e293b);
+  color: var(--text);
+  border-bottom-color: var(--bg-secondary, #1e293b);
 }
-.master-volume-slider::-moz-range-thumb {
-  width: 18px;
-  height: 18px;
-  border-radius: 50%;
-  background: var(--primary, #4a9eff);
-  border: 2px solid #fff;
-  cursor: pointer;
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
-}
-.master-volume-value {
-  font-family: monospace;
-  font-size: 0.9rem;
-  min-width: 1.5em;
-  text-align: right;
+.tab-btn:hover:not(.active) {
+  background: rgba(255,255,255,0.03);
 }
 </style>

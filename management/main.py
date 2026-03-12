@@ -9,7 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from starlette.responses import FileResponse
 
-from routers import server_control, metrics, devices, signaling, mirroring, remote, poranos_proxy
+from routers import server_control, metrics, devices, signaling, mirroring, remote, poranos_proxy, files
 from services import get_adb_path
 from services.metrics_service import MetricsService
 from services.scrcpy_service import ScrcpyService
@@ -83,6 +83,7 @@ app.include_router(signaling.router, prefix="/api/signaling", tags=["signaling"]
 app.include_router(mirroring.router, prefix="/api/mirror", tags=["mirroring"])
 app.include_router(remote.router, prefix="/api/remote", tags=["remote"])
 app.include_router(poranos_proxy.router, prefix="/api/poranos", tags=["poranos"])
+app.include_router(files.router, prefix="/api/files", tags=["files"])
 
 # Serve Vue build as static files (SPA catch-all)
 static_dir = _get_base_dir() / "static"

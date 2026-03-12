@@ -7,6 +7,7 @@ const props = defineProps<{
   device: Device
   canInstall: boolean
   installTask?: InstallTask
+  userEmail?: string
 }>()
 
 const emit = defineEmits<{
@@ -15,7 +16,7 @@ const emit = defineEmits<{
   stop: []
   cancelInstall: []
   reboot: []
-  menu: []
+  accountChange: []
 }>()
 
 const showRebootConfirm = ref(false)
@@ -30,7 +31,6 @@ function batteryColor(level?: number): string {
 const localVolume = ref(props.device.volume_music ?? 0)
 let volumeTimeout: ReturnType<typeof setTimeout> | null = null
 
-// Sync from server unless user is actively dragging
 watch(() => props.device.volume_music, (v) => {
   if (v != null && !volumeTimeout) {
     localVolume.value = v
@@ -40,7 +40,6 @@ watch(() => props.device.volume_music, (v) => {
 function onVolumeInput(e: Event) {
   const val = parseInt((e.target as HTMLInputElement).value)
   localVolume.value = val
-  // Debounce: send after 300ms of no further input
   if (volumeTimeout) clearTimeout(volumeTimeout)
   volumeTimeout = setTimeout(() => {
     sendVolume(val)
@@ -58,13 +57,20 @@ const syncViaLabel = computed(() => {
   return via.includes('localhost') ? 'adb reverse' : 'WiFi direct'
 })
 
-async function toggleSleep() {
-  const serial = props.device.adb_serial || props.device.serial
-  const action = props.device.wakefulness === 'Awake' ? 'sleep' : 'wake'
-  try {
-    await fetch(`/api/devices/${encodeURIComponent(serial)}/${action}`, { method: 'POST' })
-  } catch { /* ignore */ }
-}
+const storageColor = computed(() => {
+  const used = props.device.storage_used_gb
+  const total = props.device.storage_total_gb
+  if (used == null || total == null || total === 0) return 'var(--text-secondary)'
+  const pct = used / total * 100
+  if (pct > 90) return 'var(--danger)'
+  if (pct > 75) return 'var(--warning)'
+  return 'var(--success)'
+})
+
+const isAccountSame = computed(() => {
+  if (!props.userEmail || !props.device.app_account) return false
+  return props.device.app_account === props.userEmail
+})
 
 async function sendVolume(volume: number) {
   const serial = props.device.adb_serial || props.device.serial
@@ -82,9 +88,10 @@ async function sendVolume(volume: number) {
 
 <template>
   <div class="card">
+    <!-- Header: Serial + badges + indicators -->
     <div class="flex items-center justify-between mb-1">
       <div class="flex items-center" style="gap: 0.5rem">
-        <span style="font-weight: 600">{{ device.model }}</span>
+        <span style="font-weight: 600">{{ device.serial }}</span>
         <span
           v-if="device.connection_type"
           class="conn-badge"
@@ -93,24 +100,27 @@ async function sendVolume(volume: number) {
           {{ device.connection_type === 'usb' ? 'USB' : 'WiFi' }}
         </span>
       </div>
-      <span
-        class="status-dot"
-        :class="device.status === 'device' ? 'running' : 'stopped'"
-      ></span>
+      <div class="flex items-center" style="gap: 0.35rem">
+        <span
+          class="status-dot"
+          :class="device.status === 'device' ? 'running' : 'stopped'"
+          title="ADB"
+        ></span>
+        <span
+          class="status-dot"
+          :class="device.sync_connected ? 'sync-on' : 'sync-off'"
+          title="Sync Server"
+        ></span>
+      </div>
     </div>
 
     <div class="device-info">
       <div class="info-row">
-        <span class="info-label">Serial</span>
-        <span class="info-value">
-          {{ device.serial }}
-          <span v-if="device.connection_type === 'wifi' && device.wifi_serial" class="wifi-ip">
-            ({{ device.wifi_serial }})
-          </span>
-        </span>
+        <span class="info-label">Device</span>
+        <span class="info-value">{{ device.model }}</span>
       </div>
       <div class="info-row" v-if="device.battery_level != null">
-        <span class="info-label">Battery</span>
+        <span class="info-label">Head Battery</span>
         <span class="info-value" :style="{ color: batteryColor(device.battery_level) }">
           {{ device.battery_level }}%
           <template v-if="device.battery_plugged">
@@ -125,7 +135,7 @@ async function sendVolume(volume: number) {
         </span>
       </div>
       <div class="info-row" v-if="device.controller_left_battery != null || device.controller_right_battery != null">
-        <span class="info-label">Controllers</span>
+        <span class="info-label">Controller Batteries</span>
         <span class="info-value controller-batteries">
           <span v-if="device.controller_left_battery != null" :style="{ color: batteryColor(device.controller_left_battery) }">
             L:{{ device.controller_left_battery }}%
@@ -157,15 +167,15 @@ async function sendVolume(volume: number) {
           {{ device.app_running ? 'Running' : 'Stopped' }}
         </span>
       </div>
-      <div class="info-row" v-if="device.wakefulness">
-        <span class="info-label">Headset</span>
-        <span class="info-value" :style="{ color: device.wakefulness === 'Awake' ? 'var(--success)' : 'var(--text-secondary)' }">
-          {{ device.wakefulness }}
-          <button
-            class="sleep-btn"
-            :disabled="device.status !== 'device'"
-            @click="toggleSleep"
-          >{{ device.wakefulness === 'Awake' ? 'Sleep' : 'Awake' }}</button>
+      <div class="info-row" v-if="device.app_account">
+        <span class="info-label">Account</span>
+        <span class="info-value account-value" :title="device.app_account">{{ device.app_account }}</span>
+      </div>
+      <div class="info-row" v-if="device.storage_total_gb != null">
+        <span class="info-label">Storage</span>
+        <span class="info-value">
+          <span :style="{ color: storageColor }">{{ device.storage_used_gb }}GB</span>
+          <span style="color: var(--text-secondary)"> / {{ device.storage_total_gb }}GB</span>
         </span>
       </div>
       <div class="info-row">
@@ -215,6 +225,7 @@ async function sendVolume(volume: number) {
       <span v-if="installTask.message" class="install-message">{{ installTask.message }}</span>
     </div>
 
+    <!-- Buttons -->
     <div class="btn-group mt-1">
       <button
         v-if="!device.app_running"
@@ -240,12 +251,12 @@ async function sendVolume(volume: number) {
         Install APK
       </button>
       <button
-        class="btn btn-secondary btn-sm"
-        :disabled="device.status !== 'device'"
-        @click="$emit('menu')"
-        title="Send Meta button (toggle menu)"
+        class="btn btn-account btn-sm"
+        :disabled="!device.sync_connected || isAccountSame"
+        @click="$emit('accountChange')"
+        :title="isAccountSame ? 'Already set to this account' : 'Set account from logged-in user'"
       >
-        Menu
+        Account Change
       </button>
       <button
         class="btn btn-warning btn-sm"
@@ -294,9 +305,11 @@ async function sendVolume(volume: number) {
 .btn-group {
   display: flex;
   gap: 0.5rem;
+  flex-wrap: wrap;
 }
 .btn-group .btn {
   flex: 1;
+  min-width: 0;
 }
 .conn-badge {
   font-size: 0.65rem;
@@ -329,11 +342,6 @@ async function sendVolume(volume: number) {
 .charger-badge.slow {
   background: var(--warning, #ff9800);
   color: #1a1a2e;
-}
-.wifi-ip {
-  font-size: 0.7rem;
-  color: var(--warning, #ff9800);
-  margin-left: 0.25rem;
 }
 .volume-row {
   display: flex;
@@ -406,27 +414,6 @@ async function sendVolume(volume: number) {
   min-width: 1.5em;
   text-align: right;
 }
-.sleep-btn {
-  margin-left: 0.3rem;
-  font-size: 0.6rem;
-  font-weight: 600;
-  padding: 0.05rem 0.35rem;
-  border-radius: 4px;
-  border: 1px solid var(--border);
-  background: transparent;
-  color: var(--text);
-  cursor: pointer;
-  vertical-align: middle;
-}
-.sleep-btn:hover:not(:disabled) {
-  background: var(--primary);
-  color: #fff;
-  border-color: var(--primary);
-}
-.sleep-btn:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-}
 .sync-via-badge {
   margin-left: 0.3rem;
   font-size: 0.6rem;
@@ -442,6 +429,12 @@ async function sendVolume(volume: number) {
 .sync-via-badge.remote {
   background: var(--warning, #ff9800);
   color: #1a1a2e;
+}
+.status-dot.sync-on {
+  background: var(--primary, #4a9eff);
+}
+.status-dot.sync-off {
+  background: var(--text-secondary, #666);
 }
 .install-status {
   padding: 0.4rem 0.5rem;
@@ -488,6 +481,21 @@ async function sendVolume(volume: number) {
   50% { margin-left: 70%; }
   100% { margin-left: 0; }
 }
+.mt-05 {
+  margin-top: 0.35rem;
+}
+.btn-account {
+  background: var(--accent, #8b5cf6);
+  color: #fff;
+  border-color: var(--accent, #8b5cf6);
+}
+.btn-account:hover:not(:disabled) {
+  opacity: 0.85;
+}
+.btn-account:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
 .btn-cancel-sm {
   padding: 0.05rem 0.4rem;
   font-size: 0.7rem;
@@ -500,5 +508,11 @@ async function sendVolume(volume: number) {
 .btn-cancel-sm:hover {
   background: var(--danger);
   color: white;
+}
+.account-value {
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 </style>

@@ -1,13 +1,12 @@
 <script setup lang="ts">
-import { computed } from 'vue'
 import DeviceCard from './DeviceCard.vue'
 import type { Device, InstallTask } from '@/types'
 
 const props = defineProps<{
   devices: Device[]
-  selectedFile: File | null
-  installing: boolean
+  canInstall: boolean
   installTasks: Map<string, InstallTask>
+  userEmail?: string
 }>()
 
 defineEmits<{
@@ -16,12 +15,11 @@ defineEmits<{
   stop: [serial: string]
   cancelInstall: [serial: string]
   reboot: [serial: string]
-  menu: [serial: string]
+  accountChange: [serial: string, room: string, clientId: number]
 }>()
 
 function getDeviceTask(device: Device): InstallTask | undefined {
   const serial = device.adb_serial || device.serial
-  // Find most recent task for this device (iterate in reverse insertion order)
   let latest: InstallTask | undefined
   for (const task of props.installTasks.values()) {
     if (task.device_serial === serial || task.device_serial === device.serial) {
@@ -45,14 +43,15 @@ function getDeviceTask(device: Device): InstallTask | undefined {
         v-for="device in devices"
         :key="device.serial"
         :device="device"
-        :can-install="!!selectedFile && !installing"
+        :can-install="canInstall"
         :install-task="getDeviceTask(device)"
+        :user-email="userEmail"
         @install="$emit('install', device.adb_serial || device.serial)"
         @launch="$emit('launch', device.adb_serial || device.serial)"
         @stop="$emit('stop', device.adb_serial || device.serial)"
         @cancel-install="$emit('cancelInstall', device.adb_serial || device.serial)"
         @reboot="$emit('reboot', device.adb_serial || device.serial)"
-        @menu="$emit('menu', device.adb_serial || device.serial)"
+        @account-change="$emit('accountChange', device.adb_serial || device.serial, device.sync_room || '', device.sync_client_id || 0)"
       />
     </div>
   </div>

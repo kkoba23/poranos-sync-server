@@ -360,6 +360,7 @@ class AdbService:
                     "room": room_name,
                     "clientId": int(cid),
                     "connectedVia": client_info.get("connectedVia", ""),
+                    "account": client_info.get("account", ""),
                 }
                 hw = client_info.get("hwSerial", "")
                 if hw:
@@ -386,6 +387,8 @@ class AdbService:
                 dev["sync_room"] = info["room"]
                 dev["sync_client_id"] = info["clientId"]
                 dev["sync_connected_via"] = info["connectedVia"]
+                if info.get("account"):
+                    dev["app_account"] = info["account"]
             else:
                 dev["sync_connected"] = False
 
@@ -405,6 +408,10 @@ class AdbService:
             f"echo '==CONTROLLERS=='; dumpsys OVRRemoteService 2>/dev/null | grep 'Paired device:'; "
             f"echo '==WIFISSID=='; "
             f"dumpsys wifi | grep 'mWifiInfo' | sed 's/.*mWifiInfo SSID: //;s/, BSSID:.*//;s/\"//g' | head -1; "
+            f"echo '==STORAGE=='; "
+            f"df /data | tail -1; "
+            f"echo '==ACCOUNT=='; "
+            f"run-as {package} sh -c 'cat /data/data/{package}/shared_prefs/*.playerprefs.xml 2>/dev/null' | grep -o '\"Account\"[^<]*<string>[^<]*' | sed 's/.*<string>//' | head -1; "
             f"echo '==END=='"
         )
         shell_task = self._run_adb(
@@ -432,6 +439,9 @@ class AdbService:
         controller_left_battery = None
         controller_right_battery = None
         wifi_ssid = None
+        storage_used_gb = None
+        storage_total_gb = None
+        app_account = None
 
         # タイムアウト時は前回の情報を返す
         if rc != 0:
@@ -516,6 +526,20 @@ class AdbService:
                         cleaned = line.strip().strip('"')
                         if cleaned and not re.match(r'^([0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}$', cleaned):
                             wifi_ssid = cleaned
+                elif section == "==STORAGE==":
+                    # df output: "/dev/... 123456789 98765432 24691357 80% /data"
+                    parts = line.split()
+                    if len(parts) >= 4:
+                        try:
+                            total_kb = int(parts[1])
+                            used_kb = int(parts[2])
+                            storage_total_gb = round(total_kb / 1048576, 1)
+                            storage_used_gb = round(used_kb / 1048576, 1)
+                        except (ValueError, IndexError):
+                            pass
+                elif section == "==ACCOUNT==":
+                    if line and not app_account:
+                        app_account = line.strip()
 
             # dumpsys package が結果を返したが versionName がない場合もインストール済み
             if not app_installed and "Unable to find package" not in stdout:
@@ -547,6 +571,9 @@ class AdbService:
             "controller_left_battery": controller_left_battery,
             "controller_right_battery": controller_right_battery,
             "wifi_ssid": wifi_ssid,
+            "storage_used_gb": storage_used_gb,
+            "storage_total_gb": storage_total_gb,
+            "app_account": app_account,
             "provisioned": serial in self._provisioned_set,
             "webrtc_available": False,
         }

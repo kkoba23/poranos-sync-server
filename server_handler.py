@@ -13,7 +13,7 @@ from server_room import (
     handle_instantiate, handle_model_update, handle_destroy,
     handle_request_ownership, handle_clear_ownership,
     handle_request_transform_ownership, handle_clear_transform_ownership,
-    handle_transform_update,
+    handle_transform_update, handle_update_device_info,
 )
 from server_webrtc import (
     handle_webrtc_register, handle_webrtc_request_stream,
@@ -105,16 +105,25 @@ async def handler(ws):
             elif msg_type == "webrtc_stop_stream":
                 await handle_webrtc_stop_stream(ws, msg)
 
+            elif msg_type == "update_device_info":
+                await handle_update_device_info(ws, msg)
+
             elif msg_type == "remote_command":
-                # Management UIからのリモートコマンド → 同ルーム全クライアントにbroadcast
+                # Management UIからのリモートコマンド
                 info = ws_to_room.get(ws)
                 if info:
                     room_name, _ = info
                     from server_room import rooms
                     room = rooms.get(room_name)
                     if room:
-                        await room.broadcast_to_all(msg)
-                        log.info(f"  remote_command broadcast: command={msg.get('command')} room={room_name} clients={len(room.clients)}")
+                        # target_client_id指定時は特定クライアントのみに送信
+                        target_id = msg.get("params", {}).get("target_client_id")
+                        if target_id is not None:
+                            ok = await room.send_to_client(int(target_id), msg)
+                            log.info(f"  remote_command targeted: command={msg.get('command')} room={room_name} target={target_id} ok={ok}")
+                        else:
+                            await room.broadcast_to_all(msg)
+                            log.info(f"  remote_command broadcast: command={msg.get('command')} room={room_name} clients={len(room.clients)}")
                         # ack を返す（送信側が切断前にbroadcast完了を確認できるように）
                         await ws.send(json.dumps({"type": "remote_command_ack", "command": msg.get("command")}))
                 else:

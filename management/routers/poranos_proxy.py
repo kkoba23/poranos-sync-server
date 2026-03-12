@@ -7,12 +7,15 @@ On failure (offline): returns cached data from disk.
 
 import asyncio
 import logging
+import os
 import time
 
+import aiofiles
 import httpx
 from fastapi import APIRouter, Header, HTTPException
 from fastapi.responses import FileResponse
 
+from config import settings
 from services.cache_service import (
     save_json, load_json,
     download_and_cache_thumbnail, get_thumbnail_path, has_thumbnail,
@@ -181,3 +184,137 @@ async def get_thumbnail(category: str, item_id: int, size: str):
         raise HTTPException(status_code=404, detail="Thumbnail not cached")
 
     return FileResponse(str(path), media_type="image/jpeg")
+
+
+# ── APK Release Endpoints ──
+
+@router.get("/releases")
+async def get_releases(authorization: str = Header(default="")):
+    """Get available APK releases from poranos.com."""
+    token = authorization.replace("Bearer ", "") if authorization else ""
+
+    data = await _poranos_get("/app-releases/", token) if token else None
+
+    if data is not None:
+        save_json("releases", data)
+        return {"source": "online", "data": data}
+
+    cached = load_json("releases")
+    if cached is not None:
+        return {"source": "cache", "data": cached}
+
+    raise HTTPException(status_code=503, detail="No connection and no cached data")
+
+
+async def _download_apk(download_url: str, file_name: str) -> str:
+    """Download APK from presigned URL to local uploads directory. Returns local file path."""
+    apk_dir = os.path.join(settings.upload_dir, "apk_releases")
+    os.makedirs(apk_dir, exist_ok=True)
+    apk_path = os.path.join(apk_dir, file_name)
+
+    # Skip download if file already exists and is non-empty
+    if os.path.exists(apk_path) and os.path.getsize(apk_path) > 0:
+        log.info(f"[releases] APK already cached: {apk_path}")
+        return apk_path
+
+    log.info(f"[releases] Downloading APK: {file_name}")
+    async with httpx.AsyncClient(timeout=300, follow_redirects=True) as client:
+        resp = await client.get(download_url)
+        if resp.status_code != 200:
+            raise HTTPException(
+                status_code=502,
+                detail=f"Failed to download APK: HTTP {resp.status_code}",
+            )
+        async with aiofiles.open(apk_path, "wb") as f:
+            await f.write(resp.content)
+
+    log.info(f"[releases] APK downloaded: {apk_path} ({os.path.getsize(apk_path)} bytes)")
+    return apk_path
+
+
+def _get_release_by_id(releases: list, release_id: int) -> dict | None:
+    """Find a release by ID from the releases list."""
+    for r in releases:
+        if r.get("id") == release_id:
+            return r
+    return None
+
+
+async def _fetch_release(release_id: int, token: str) -> dict:
+    """Fetch releases and find the specified one. Raises HTTPException if not found."""
+    data = await _poranos_get("/app-releases/", token) if token else None
+    if data is None:
+        data = load_json("releases")
+    if data is None:
+        raise HTTPException(status_code=503, detail="Cannot fetch releases")
+
+    release = _get_release_by_id(data, release_id)
+    if not release:
+        raise HTTPException(status_code=404, detail="Release not found")
+    if not release.get("download_url"):
+        raise HTTPException(status_code=404, detail="Release has no download URL")
+    return release
+
+
+@router.post("/releases/{release_id}/install/{serial}")
+async def install_release_on_device(
+    release_id: int, serial: str,
+    authorization: str = Header(default=""),
+):
+    """Download APK from poranos.com and install on a specific device via adb."""
+    from routers.devices import _adb_service, _broadcast_task_update
+    from services.adb_service import AdbService, set_task_update_callback
+
+    token = authorization.replace("Bearer ", "") if authorization else ""
+    release = await _fetch_release(release_id, token)
+
+    apk_path = await _download_apk(release["download_url"], release["file_name"])
+
+    # Cancel any existing install for this device
+    await _adb_service.cancel_install_for_device(serial)
+
+    task = AdbService.create_task(serial, release["file_name"])
+    asyncio.create_task(
+        _adb_service.install_apk(serial, apk_path, task["task_id"])
+    )
+    return task
+
+
+@router.post("/releases/{release_id}/install-all")
+async def install_release_on_all(
+    release_id: int,
+    authorization: str = Header(default=""),
+):
+    """Download APK from poranos.com and install on all connected devices via adb."""
+    from routers.devices import _adb_service, _broadcast_task_update
+    from services.adb_service import AdbService, set_task_update_callback
+
+    token = authorization.replace("Bearer ", "") if authorization else ""
+    release = await _fetch_release(release_id, token)
+
+    apk_path = await _download_apk(release["download_url"], release["file_name"])
+
+    devices = await _adb_service.get_devices()
+    tasks = []
+    install_queue: list[tuple[str, str]] = []
+    for device in devices:
+        if device["status"] != "device":
+            continue
+        adb_serial = device.get("adb_serial") or device["serial"]
+        display_serial = device["serial"]
+        await _adb_service.cancel_install_for_device(adb_serial)
+        task = AdbService.create_task(display_serial, release["file_name"])
+        install_queue.append((adb_serial, task["task_id"]))
+        tasks.append(task)
+
+    async def _batched_install():
+        for i in range(0, len(install_queue), 2):
+            batch = install_queue[i:i + 2]
+            await asyncio.gather(*(
+                _adb_service.install_apk(adb_serial, apk_path, task_id)
+                for adb_serial, task_id in batch
+            ))
+
+    asyncio.create_task(_batched_install())
+
+    return {"tasks": tasks}

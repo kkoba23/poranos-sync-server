@@ -103,6 +103,9 @@ function reloadPage() {
         <li v-else>
           <router-link to="/login">Login</router-link>
         </li>
+        <li v-if="authStore.isAuthenticated">
+          <router-link to="/files">Files</router-link>
+        </li>
         <li><router-link to="/devices">Devices</router-link></li>
         <li><router-link to="/mirroring">Mirroring</router-link></li>
         <li><router-link to="/sync-server">Sync Server</router-link></li>

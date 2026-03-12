@@ -86,6 +86,18 @@ class Room:
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
 
+    async def send_to_client(self, client_id: int, msg: dict) -> bool:
+        """特定のクライアントにメッセージを送信。成功時True"""
+        ws = self.clients.get(client_id)
+        if ws is None:
+            return False
+        try:
+            await ws.send(json.dumps(msg))
+            return True
+        except Exception as e:
+            log.warning(f"  send_to_client failed: clientId={client_id} error={e}")
+            return False
+
     async def broadcast_to_all(self, msg: dict):
         """ルーム内の全クライアントに送信（除外なし）"""
         data = json.dumps(msg)
@@ -163,8 +175,9 @@ async def handle_join_room(ws, msg: dict):
     android_id = msg.get("androidId", "")
     hw_serial = msg.get("hwSerial", "")
     connected_via = msg.get("connectedVia", "")
+    account = msg.get("account", "")
     if device_id or device_name or connected_via:
-        ws_device_info[ws] = {"deviceId": device_id, "deviceName": device_name, "deviceModel": device_model, "androidId": android_id, "hwSerial": hw_serial, "connectedVia": connected_via}
+        ws_device_info[ws] = {"deviceId": device_id, "deviceName": device_name, "deviceModel": device_model, "androidId": android_id, "hwSerial": hw_serial, "connectedVia": connected_via, "account": account}
 
     log.info(f"  [{room_name}] Client joined: clientId={client_id} device={device_name}({device_model}) hwSerial={hw_serial} via={connected_via} (total={len(room.clients)})")
 
@@ -198,6 +211,17 @@ async def handle_join_room(ws, msg: dict):
         "objects": [obj.to_dict() for obj in room.objects.values()],
         "modelStates": model_states,
     }))
+
+
+async def handle_update_device_info(ws, msg: dict):
+    """クライアントのデバイス情報を部分更新（アカウント変更時など）"""
+    info = ws_device_info.get(ws)
+    if info is None:
+        return
+    for key in ("account",):
+        if key in msg:
+            info[key] = msg[key]
+    log.info(f"  update_device_info: account={info.get('account', '')}")
 
 
 async def handle_leave_room(ws):

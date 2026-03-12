@@ -5,6 +5,7 @@ defineProps<{
   confirmLabel?: string
   confirmClass?: string
   loading?: boolean
+  hideCancel?: boolean
 }>()
 
 defineEmits<{
@@ -20,7 +21,7 @@ defineEmits<{
         <div class="modal-title">{{ title }}</div>
         <div class="modal-message">{{ message }}</div>
         <div class="modal-actions">
-          <button class="btn btn-secondary btn-sm" :disabled="loading" @click="$emit('cancel')">
+          <button v-if="!hideCancel" class="btn btn-secondary btn-sm" :disabled="loading" @click="$emit('cancel')">
             Cancel
           </button>
           <button

@@ -162,6 +162,7 @@ async def handle_metrics_request(connection, request):
                     "androidId": dev_info.get("androidId", ""),
                     "hwSerial": dev_info.get("hwSerial", ""),
                     "connectedVia": dev_info.get("connectedVia", ""),
+                    "account": dev_info.get("account", ""),
                     "last_ping_ago_sec": round(now - last_ping, 1) if last_ping else None,
                 }
             objects_info = {}
