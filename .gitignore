@@ -1,0 +1,9 @@
+__pycache__/
+*.pyc
+.env
+dist-electron/
+dist-pyinstaller/
+build/
+node_modules/
+uploads/
+*.spec

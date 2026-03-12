@@ -1,0 +1,63 @@
+{
+  "name": "poranos-management",
+  "version": "1.0.0",
+  "description": "Poranos Management Desktop App",
+  "main": "main.js",
+  "author": "Poranos",
+  "license": "UNLICENSED",
+  "scripts": {
+    "start": "electron .",
+    "pack": "electron-builder --dir",
+    "dist": "electron-builder"
+  },
+  "devDependencies": {
+    "electron": "^35.0.0",
+    "electron-builder": "^26.0.0"
+  },
+  "build": {
+    "appId": "com.poranos.management",
+    "productName": "Poranos Management",
+    "directories": {
+      "output": "../dist-electron"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "poranos.ico"
+    ],
+    "extraResources": [
+      {
+        "from": "../dist-pyinstaller/backend",
+        "to": "backend",
+        "filter": ["**/*"]
+      },
+      {
+        "from": "../dist-pyinstaller/sync-server",
+        "to": "sync-server",
+        "filter": ["**/*"]
+      }
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": ["x64"]
+        },
+        {
+          "target": "portable",
+          "arch": ["x64"]
+        }
+      ],
+      "icon": "poranos.ico",
+      "signAndEditExecutable": false
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "installerIcon": "poranos.ico"
+    },
+    "portable": {
+      "artifactName": "PoranosManagement-${version}-portable.exe"
+    }
+  }
+}

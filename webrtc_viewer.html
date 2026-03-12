@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Poranos WebRTC Viewer</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #1a1a2e; color: #eee; min-height: 100vh; display: flex; flex-direction: column; align-items: center; }
+  h1 { margin: 20px 0 10px; font-size: 1.4em; color: #7ec8e3; }
+  .status { font-size: 0.9em; margin-bottom: 16px; }
+  .status .dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; vertical-align: middle; }
+  .dot.connected { background: #4caf50; }
+  .dot.disconnected { background: #f44336; }
+  .dot.streaming { background: #ff9800; animation: pulse 1s infinite; }
+  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
+  #device-list { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 16px; }
+  .device-btn { padding: 10px 20px; border: 2px solid #7ec8e3; border-radius: 8px; background: transparent; color: #7ec8e3; cursor: pointer; font-size: 1em; transition: all 0.2s; }
+  .device-btn:hover { background: #7ec8e3; color: #1a1a2e; }
+  .device-btn.active { background: #ff9800; border-color: #ff9800; color: #1a1a2e; }
+  .device-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+  #video-container { position: relative; width: 640px; max-width: 95vw; background: #000; border-radius: 8px; overflow: hidden; aspect-ratio: 4/3; }
+  #video-container video { width: 100%; height: 100%; object-fit: contain; }
+  #video-container .placeholder { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: #666; font-size: 1.1em; }
+  #stop-btn { margin-top: 12px; padding: 8px 24px; border: 2px solid #f44336; border-radius: 8px; background: transparent; color: #f44336; cursor: pointer; font-size: 1em; display: none; }
+  #stop-btn:hover { background: #f44336; color: #fff; }
+  .log { margin-top: 20px; width: 640px; max-width: 95vw; max-height: 200px; overflow-y: auto; background: #0d0d1a; border-radius: 8px; padding: 10px; font-family: monospace; font-size: 0.8em; color: #888; }
+</style>
+</head>
+<body>
+<h1>Poranos WebRTC Viewer</h1>
+<div class="status">
+  <span class="dot disconnected" id="status-dot"></span>
+  <span id="status-text">接続中...</span>
+</div>
+<div id="device-list"></div>
+<div id="video-container">
+  <video id="video" autoplay playsinline muted></video>
+  <div class="placeholder" id="placeholder">デバイスを選択してください</div>
+</div>
+<button id="stop-btn">配信停止</button>
+<div class="log" id="log"></div>
+
+<script>
+const wsUrl = `ws://${location.hostname}:${location.port || 8765}`;
+let ws = null;
+let pc = null;
+let viewerId = null;
+let watchingDeviceId = null;
+
+const statusDot = document.getElementById('status-dot');
+const statusText = document.getElementById('status-text');
+const deviceList = document.getElementById('device-list');
+const video = document.getElementById('video');
+const placeholder = document.getElementById('placeholder');
+const stopBtn = document.getElementById('stop-btn');
+const logEl = document.getElementById('log');
+
+function log(msg) {
+  const time = new Date().toLocaleTimeString();
+  logEl.textContent += `[${time}] ${msg}\n`;
+  logEl.scrollTop = logEl.scrollHeight;
+  console.log(msg);
+}
+
+function setStatus(state, text) {
+  statusDot.className = `dot ${state}`;
+  statusText.textContent = text;
+}
+
+function connect() {
+  ws = new WebSocket(wsUrl);
+
+  ws.onopen = () => {
+    log('WebSocket接続完了');
+    setStatus('connected', '接続済み');
+    ws.send(JSON.stringify({ type: 'webrtc_register', role: 'viewer' }));
+  };
+
+  ws.onmessage = (e) => {
+    const msg = JSON.parse(e.data);
+    handleMessage(msg);
+  };
+
+  ws.onclose = () => {
+    log('WebSocket切断');
+    setStatus('disconnected', '切断 - 再接続中...');
+    viewerId = null;
+    cleanup();
+    setTimeout(connect, 3000);
+  };
+
+  ws.onerror = (e) => {
+    log(`WebSocketエラー: ${e.message || 'unknown'}`);
+  };
+}
+
+function handleMessage(msg) {
+  switch (msg.type) {
+    case 'webrtc_registered':
+      viewerId = msg.viewer_id;
+      log(`ビューアー登録完了: ${viewerId}`);
+      updateDeviceList(msg.devices || []);
+      break;
+
+    case 'webrtc_device_list':
+      updateDeviceList(msg.devices || []);
+      break;
+
+    case 'webrtc_offer':
+      log(`Offer受信: ${msg.device_id}`);
+      handleOffer(msg.device_id, msg.sdp);
+      break;
+
+    case 'webrtc_ice_candidate':
+      if (pc && msg.candidate) {
+        pc.addIceCandidate(new RTCIceCandidate(msg.candidate))
+          .catch(e => log(`ICE candidate追加エラー: ${e.message}`));
+      }
+      break;
+
+    case 'webrtc_device_disconnected':
+      log(`デバイス切断: ${msg.device_id}`);
+      if (watchingDeviceId === msg.device_id) {
+        cleanup();
+        placeholder.textContent = 'デバイスが切断されました';
+        placeholder.style.display = 'flex';
+      }
+      break;
+
+    default:
+      break;
+  }
+}
+
+function updateDeviceList(devices) {
+  deviceList.innerHTML = '';
+  if (devices.length === 0) {
+    deviceList.innerHTML = '<span style="color:#666">配信可能なデバイスはありません</span>';
+    return;
+  }
+  devices.forEach(d => {
+    const btn = document.createElement('button');
+    btn.className = `device-btn${watchingDeviceId === d.device_id ? ' active' : ''}`;
+    btn.textContent = `${d.device_id}`;
+    btn.disabled = watchingDeviceId === d.device_id;
+    btn.onclick = () => requestStream(d.device_id);
+    deviceList.appendChild(btn);
+  });
+}
+
+function requestStream(deviceId) {
+  if (watchingDeviceId) {
+    stopStream();
+  }
+  watchingDeviceId = deviceId;
+  log(`配信リクエスト: ${deviceId}`);
+  ws.send(JSON.stringify({ type: 'webrtc_request_stream', device_id: deviceId }));
+  setStatus('streaming', `配信待機中: ${deviceId}`);
+  placeholder.textContent = '接続中...';
+  placeholder.style.display = 'flex';
+}
+
+async function handleOffer(deviceId, sdp) {
+  try {
+    cleanup();
+    watchingDeviceId = deviceId;
+
+    pc = new RTCPeerConnection({
+      iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+    });
+
+    pc.onicecandidate = (e) => {
+      if (e.candidate) {
+        ws.send(JSON.stringify({
+          type: 'webrtc_ice_candidate',
+          device_id: deviceId,
+          candidate: e.candidate.toJSON(),
+        }));
+      }
+    };
+
+    pc.ontrack = (e) => {
+      log('映像トラック受信');
+      video.srcObject = e.streams[0] || new MediaStream([e.track]);
+      placeholder.style.display = 'none';
+      stopBtn.style.display = 'inline-block';
+      setStatus('streaming', `配信中: ${deviceId}`);
+    };
+
+    pc.oniceconnectionstatechange = () => {
+      log(`ICE状態: ${pc.iceConnectionState}`);
+      if (pc.iceConnectionState === 'disconnected' || pc.iceConnectionState === 'failed') {
+        log('接続が切断されました');
+        cleanup();
+        placeholder.textContent = '接続が切断されました';
+        placeholder.style.display = 'flex';
+        setStatus('disconnected', '映像切断');
+      }
+    };
+
+    await pc.setRemoteDescription(new RTCSessionDescription({ type: 'offer', sdp: sdp }));
+    const answer = await pc.createAnswer();
+    await pc.setLocalDescription(answer);
+
+    ws.send(JSON.stringify({
+      type: 'webrtc_answer',
+      device_id: deviceId,
+      sdp: answer.sdp,
+    }));
+    log('Answer送信完了');
+
+  } catch (e) {
+    log(`Offer処理エラー: ${e.message}`);
+  }
+}
+
+function stopStream() {
+  if (watchingDeviceId && ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({ type: 'webrtc_stop_stream', device_id: watchingDeviceId }));
+    log(`配信停止: ${watchingDeviceId}`);
+  }
+  cleanup();
+  placeholder.textContent = 'デバイスを選択してください';
+  placeholder.style.display = 'flex';
+  setStatus('connected', '接続済み');
+}
+
+function cleanup() {
+  if (pc) {
+    pc.close();
+    pc = null;
+  }
+  video.srcObject = null;
+  stopBtn.style.display = 'none';
+  watchingDeviceId = null;
+  // Update device list buttons
+  document.querySelectorAll('.device-btn').forEach(btn => {
+    btn.classList.remove('active');
+    btn.disabled = false;
+  });
+}
+
+stopBtn.onclick = stopStream;
+
+// 起動
+connect();
+</script>
+</body>
+</html>

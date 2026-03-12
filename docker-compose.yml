@@ -1,0 +1,41 @@
+services:
+  sync-server:
+    build:
+      context: .
+      dockerfile: sync-server/Dockerfile
+    container_name: poranos-sync-server
+    ports:
+      - "${SYNC_PORT:-8765}:8765"
+    environment:
+      - PORANOS_HOST=0.0.0.0
+      - PORANOS_PORT=8765
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8765/metrics')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  management:
+    build:
+      context: .
+      dockerfile: management/Dockerfile
+    container_name: poranos-management
+    ports:
+      - "${MGMT_PORT:-8080}:8080"
+    environment:
+      - SYNC_SERVER_URL=http://sync-server:8765
+      - ADB_HOST=host.docker.internal
+      - ADB_PORT=5037
+      - UPLOAD_DIR=/app/uploads
+      - DOCKER_CONTAINER_NAME=poranos-sync-server
+      - WIFI_DEVICES=${WIFI_DEVICES:-}
+    volumes:
+      - //var/run/docker.sock:/var/run/docker.sock
+      - ./uploads:/app/uploads
+    depends_on:
+      sync-server:
+        condition: service_healthy
+    restart: unless-stopped
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
