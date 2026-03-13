@@ -46,7 +46,7 @@ async function fetchReleases() {
   error.value = ''
   try {
     const result = await proxyGet<{ source: string; data: AppRelease[] }>('/api/poranos/releases')
-    releases.value = result.data
+    releases.value = result.data.filter(r => !r.app_type || r.app_type !== 'sync_server')
   } catch (e: any) {
     error.value = e.message || 'Failed to fetch releases'
   } finally {

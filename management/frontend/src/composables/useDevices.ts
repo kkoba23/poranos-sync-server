@@ -1,19 +1,26 @@
 import { ref, onMounted, onUnmounted } from 'vue'
 import { wsUrl, post } from '@/api/client'
 import type { Device, InstallTask } from '@/types'
+import { useToast } from '@/composables/useToast'
 
 export function useDevices() {
   const devices = ref<Device[]>([])
   const installTasks = ref<Map<string, InstallTask>>(new Map())
   const connected = ref(false)
+  const toast = useToast()
   let ws: WebSocket | null = null
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null
+  // Track provisioned state to detect changes
+  const prevProvisionedMap = new Map<string, boolean>()
+  let suppressToastUntil = 0  // suppress toasts during initial load
 
   function connect() {
     ws = new WebSocket(wsUrl('/api/devices/ws'))
 
     ws.onopen = () => {
       connected.value = true
+      // Suppress provisioned toasts for 8s after WS connect (initial device load)
+      suppressToastUntil = Date.now() + 8000
     }
 
     ws.onclose = () => {
@@ -29,9 +36,30 @@ export function useDevices() {
       try {
         const msg = JSON.parse(event.data)
         if (msg.type === 'devices_update') {
+          // Detect provisioned state changes
+          if (Date.now() > suppressToastUntil) {
+            for (const d of msg.devices as Device[]) {
+              const wasProvisioned = prevProvisionedMap.get(d.serial)
+              // New device appeared with provisioned=true, or false→true transition
+              if (d.provisioned && wasProvisioned !== true) {
+                toast.success(`[${d.serial}] プロビジョニング完了`)
+              }
+            }
+          }
+          // Update tracked state
+          prevProvisionedMap.clear()
+          for (const d of msg.devices as Device[]) {
+            prevProvisionedMap.set(d.serial, !!d.provisioned)
+          }
           devices.value = msg.devices
         } else if (msg.type === 'install_progress' || msg.type === 'install_complete') {
           installTasks.value.set(msg.task_id, msg)
+        } else if (msg.type === 'provision_event') {
+          const level = msg.level || 'info'
+          const text = `[${msg.serial}] ${msg.message}`
+          if (level === 'error') toast.error(text)
+          else if (level === 'warning') toast.warning(text)
+          else toast.info(text)
         }
       } catch {
         // ignore

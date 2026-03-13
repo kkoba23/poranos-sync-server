@@ -471,8 +471,21 @@ class ScrcpyService:
         async with lock:
             logger.info(f"[{serial}] start_stream called (existing={serial in self._streams})")
             if serial in self._streams and self._streams[serial].running:
-                if self._streams[serial].max_size == max_size:
-                    return self._streams[serial]
+                stream = self._streams[serial]
+                # scrcpy プロセスが死んでいたら再起動
+                if stream.process and stream.process.returncode is not None:
+                    logger.warning(
+                        f"[{serial}] scrcpy process died (rc={stream.process.returncode}), restarting"
+                    )
+                    await stream.stop()
+                    del self._streams[serial]
+                # relay_task が終了していたら再起動
+                elif stream._relay_task and stream._relay_task.done():
+                    logger.warning(f"[{serial}] relay task ended, restarting stream")
+                    await stream.stop()
+                    del self._streams[serial]
+                elif stream.max_size == max_size:
+                    return stream
                 # 解像度変更: 既存ストリームを停止して再起動
                 logger.info(f"[{serial}] Restarting stream: max_size {self._streams[serial].max_size} -> {max_size}")
                 await self._streams[serial].stop()

@@ -17,7 +17,12 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$SCRIPT_DIR"
 
-NPM_CMD="/c/nvm4w/nodejs/npm.cmd"
+# Cross-platform npm command
+if [[ "$(uname)" == "Darwin" ]]; then
+    NPM_CMD="npm"
+else
+    NPM_CMD="/c/nvm4w/nodejs/npm.cmd"
+fi
 SERVER_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 step_frontend() {

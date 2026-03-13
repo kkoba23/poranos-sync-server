@@ -183,8 +183,8 @@ export function useScrcpyStream() {
         const maxRetries = 10
         if (retryCount < maxRetries) {
           retryCount++
-          // 1013 (Try Again Later) = サーバー側クールダウン中 → 長めの間隔で待つ
-          const baseDelay = event.code === 1013 ? 15000 : 2000 * retryCount
+          // 1013 (Try Again Later) = サーバー側クールダウン中(30s) → それに合わせて待つ
+          const baseDelay = event.code === 1013 ? 30000 : 2000 * retryCount
           const delay = Math.min(baseDelay, 30000)
           console.log(`[ScrcpyStream] Retry ${retryCount}/${maxRetries} in ${delay}ms...`)
           state.value.error = null // エラーを表示せずConnecting...を維持

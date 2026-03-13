@@ -108,6 +108,7 @@ export interface DeviceStream {
 
 export interface AppRelease {
   id: number
+  app_type?: string
   version: string
   file_name: string
   download_url?: string

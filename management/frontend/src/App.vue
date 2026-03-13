@@ -2,13 +2,19 @@
 import { ref, computed, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { useAuthStore } from '@/stores/authStore'
+import { useSettingsStore } from '@/stores/settingsStore'
+import { useI18n } from '@/i18n'
 import { post, get } from '@/api/client'
 import DeviceSidebar from '@/components/mirroring/DeviceSidebar.vue'
+import AppToast from '@/components/AppToast.vue'
 
 const authStore = useAuthStore()
+const settings = useSettingsStore()
+const { t } = useI18n()
 const route = useRoute()
 
-const showDeviceSidebar = computed(() => route.path.startsWith('/operation'))
+const isPortable = computed(() => settings.uiMode === 'portable')
+const showDeviceSidebar = computed(() => !isPortable.value && route.path.startsWith('/operation'))
 
 const sidebarCollapsed = ref(false)
 const contentCollapsed = ref(false)
@@ -93,76 +99,86 @@ function reloadPage() {
 </script>
 
 <template>
-  <div class="app-layout" :class="{ 'sidebar-collapsed': sidebarCollapsed, 'content-collapsed': contentCollapsed, 'mirror-collapsed': mirrorCollapsed }">
-    <aside class="sidebar">
-      <div class="sidebar-title">Poranos</div>
-      <ul class="sidebar-nav">
-        <li v-if="authStore.isAuthenticated">
-          <router-link to="/operation">Operation</router-link>
-        </li>
-        <li v-else>
-          <router-link to="/login">Login</router-link>
-        </li>
-        <li v-if="authStore.isAuthenticated">
-          <router-link to="/files">Files</router-link>
-        </li>
-        <li><router-link to="/devices">Devices</router-link></li>
-        <li><router-link to="/mirroring">Mirroring</router-link></li>
-        <li><router-link to="/sync-server">Sync Server</router-link></li>
-      </ul>
-      <div class="sidebar-controls">
-        <div class="control-row">
-          <span class="control-label">Auto Launch</span>
-          <button
-            class="toggle-btn"
-            :class="{ active: autoLaunch }"
-            :disabled="autoLaunchLoading"
-            @click="toggleAutoLaunch"
-          >{{ autoLaunch ? 'ON' : 'OFF' }}</button>
-        </div>
-        <button
-          class="btn-fullscreen btn-danger-outline"
-          :disabled="allStopping"
-          @click="allStop"
-        >{{ allStopping ? 'Stopping...' : 'All Stop + Reset' }}</button>
-        <div class="control-group">
-          <span class="control-group-label">All Volume</span>
+  <div class="app-layout" :class="{ 'sidebar-collapsed': sidebarCollapsed, 'content-collapsed': contentCollapsed, 'mirror-collapsed': mirrorCollapsed, 'no-sidebar': isPortable }">
+    <!-- Sidebar: hidden in portable mode -->
+    <template v-if="!isPortable">
+      <aside class="sidebar">
+        <div class="sidebar-title">Poranos</div>
+        <ul class="sidebar-nav">
+          <li v-if="authStore.isAuthenticated">
+            <router-link to="/operation">{{ t('nav.operation') }}</router-link>
+          </li>
+          <li v-else>
+            <router-link to="/login">{{ t('nav.login') }}</router-link>
+          </li>
+          <li v-if="authStore.isAuthenticated">
+            <router-link to="/files">{{ t('nav.files') }}</router-link>
+          </li>
+          <li><router-link to="/devices">{{ t('nav.devices') }}</router-link></li>
+          <li><router-link to="/mirroring">{{ t('nav.mirroring') }}</router-link></li>
+          <li><router-link to="/sync-server">{{ t('nav.syncServer') }}</router-link></li>
+
+          <li class="nav-separator"></li>
+          <li>
+            <router-link to="/settings">{{ t('nav.settings') }}</router-link>
+          </li>
+        </ul>
+
+        <div class="sidebar-controls">
           <div class="control-row">
-            <input
-              type="range"
-              min="0"
-              max="15"
-              v-model.number="allVolume"
-              class="volume-slider"
-            />
-            <span class="volume-value">{{ allVolume }}</span>
+            <span class="control-label">{{ t('sidebar.autoLaunch') }}</span>
             <button
-              class="btn-apply"
-              :disabled="allVolumeApplying"
-              @click="applyAllVolume"
-            >{{ allVolumeApplying ? '...' : 'Apply' }}</button>
+              class="toggle-btn"
+              :class="{ active: autoLaunch }"
+              :disabled="autoLaunchLoading"
+              @click="toggleAutoLaunch"
+            >{{ autoLaunch ? 'ON' : 'OFF' }}</button>
+          </div>
+          <button
+            class="btn-fullscreen btn-danger-outline"
+            :disabled="allStopping"
+            @click="allStop"
+          >{{ allStopping ? t('sidebar.allStopProgress') : t('sidebar.allStop') }}</button>
+          <div class="control-group">
+            <span class="control-group-label">{{ t('sidebar.allVolume') }}</span>
+            <div class="control-row">
+              <input
+                type="range"
+                min="0"
+                max="15"
+                v-model.number="allVolume"
+                class="volume-slider"
+              />
+              <span class="volume-value">{{ allVolume }}</span>
+              <button
+                class="btn-apply"
+                :disabled="allVolumeApplying"
+                @click="applyAllVolume"
+              >{{ allVolumeApplying ? '...' : t('sidebar.apply') }}</button>
+            </div>
           </div>
         </div>
-      </div>
-      <div class="sidebar-bottom">
-        <div v-if="authStore.isAuthenticated" class="auth-info">
-          <span class="auth-email">{{ authStore.userEmail }}</span>
-          <button class="btn-fullscreen" @click="authStore.logout()">Logout</button>
+
+        <div class="sidebar-bottom">
+          <div v-if="authStore.isAuthenticated" class="auth-info">
+            <span class="auth-email">{{ authStore.userEmail }}</span>
+            <button class="btn-fullscreen" @click="authStore.logout()">{{ t('sidebar.logout') }}</button>
+          </div>
+          <button class="btn-fullscreen" @click="toggleFullscreen">
+            {{ isFullscreen ? t('sidebar.exitFullscreen') : t('sidebar.kioskMode') }}
+          </button>
+          <button class="btn-fullscreen" @click="reloadPage">
+            {{ t('sidebar.reload') }}
+          </button>
         </div>
-        <button class="btn-fullscreen" @click="toggleFullscreen">
-          {{ isFullscreen ? 'Exit Fullscreen' : 'Kiosk Mode' }}
-        </button>
-        <button class="btn-fullscreen" @click="reloadPage">
-          Reload
+      </aside>
+      <div class="area-divider" @click="sidebarCollapsed = !sidebarCollapsed" :title="sidebarCollapsed ? 'Show sidebar' : 'Hide sidebar'">
+        <button class="area-divider-btn">
+          {{ sidebarCollapsed ? '&raquo;' : '&laquo;' }}
         </button>
       </div>
-    </aside>
-    <div class="area-divider" @click="sidebarCollapsed = !sidebarCollapsed" :title="sidebarCollapsed ? 'Show sidebar' : 'Hide sidebar'">
-      <button class="area-divider-btn">
-        {{ sidebarCollapsed ? '&raquo;' : '&laquo;' }}
-      </button>
-    </div>
-    <main v-show="!contentCollapsed" class="main-content">
+    </template>
+    <main v-show="!contentCollapsed" class="main-content" :class="{ 'portable-main': isPortable }">
       <router-view />
     </main>
     <div v-if="showDeviceSidebar && !mirrorCollapsed" class="area-divider" @click="contentCollapsed = !contentCollapsed" :title="contentCollapsed ? 'Show content' : 'Hide content'">
@@ -179,4 +195,5 @@ function reloadPage() {
       <DeviceSidebar :expanded="contentCollapsed" />
     </aside>
   </div>
+  <AppToast />
 </template>

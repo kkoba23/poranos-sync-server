@@ -9,6 +9,7 @@ import asyncio
 import logging
 import os
 import time
+from urllib.parse import quote, urlparse, urlunparse
 
 import aiofiles
 import httpx
@@ -49,13 +50,13 @@ async def _poranos_get(endpoint: str, token: str) -> dict | list | None:
         return None
 
     try:
-        async with httpx.AsyncClient(timeout=3, follow_redirects=True) as client:
+        headers = {"Accept": "application/json"}
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+        async with httpx.AsyncClient(timeout=10, follow_redirects=True) as client:
             resp = await client.get(
                 f"{PORANOS_API}{endpoint}",
-                headers={
-                    "Authorization": f"Bearer {token}",
-                    "Accept": "application/json",
-                },
+                headers=headers,
             )
             if resp.status_code == 200:
                 _last_failure_time = 0  # reset on success
@@ -190,10 +191,10 @@ async def get_thumbnail(category: str, item_id: int, size: str):
 
 @router.get("/releases")
 async def get_releases(authorization: str = Header(default="")):
-    """Get available APK releases from poranos.com."""
+    """Get available releases from poranos.com."""
     token = authorization.replace("Bearer ", "") if authorization else ""
 
-    data = await _poranos_get("/app-releases/", token) if token else None
+    data = await _poranos_get("/app-releases/", token)
 
     if data is not None:
         save_json("releases", data)
@@ -206,20 +207,26 @@ async def get_releases(authorization: str = Header(default="")):
     raise HTTPException(status_code=503, detail="No connection and no cached data")
 
 
-async def _download_apk(download_url: str, file_name: str) -> str:
+async def _download_apk(download_url: str, file_name: str, expected_size: int = 0) -> str:
     """Download APK from presigned URL to local uploads directory. Returns local file path."""
     apk_dir = os.path.join(settings.upload_dir, "apk_releases")
     os.makedirs(apk_dir, exist_ok=True)
     apk_path = os.path.join(apk_dir, file_name)
 
-    # Skip download if file already exists and is non-empty
+    # Skip download if file already exists and size matches (or no expected size given)
     if os.path.exists(apk_path) and os.path.getsize(apk_path) > 0:
-        log.info(f"[releases] APK already cached: {apk_path}")
-        return apk_path
+        local_size = os.path.getsize(apk_path)
+        if expected_size == 0 or local_size == expected_size:
+            log.info(f"[releases] APK already cached: {apk_path}")
+            return apk_path
+        log.info(f"[releases] Cache size mismatch ({local_size} != {expected_size}), re-downloading")
 
     log.info(f"[releases] Downloading APK: {file_name}")
+    # Encode spaces in URL path, but avoid double-encoding already-encoded chars
+    parsed = urlparse(download_url)
+    encoded_url = urlunparse(parsed._replace(path=quote(parsed.path, safe="/%")))
     async with httpx.AsyncClient(timeout=300, follow_redirects=True) as client:
-        resp = await client.get(download_url)
+        resp = await client.get(encoded_url)
         if resp.status_code != 200:
             raise HTTPException(
                 status_code=502,
@@ -242,7 +249,7 @@ def _get_release_by_id(releases: list, release_id: int) -> dict | None:
 
 async def _fetch_release(release_id: int, token: str) -> dict:
     """Fetch releases and find the specified one. Raises HTTPException if not found."""
-    data = await _poranos_get("/app-releases/", token) if token else None
+    data = await _poranos_get("/app-releases/", token)
     if data is None:
         data = load_json("releases")
     if data is None:
@@ -318,3 +325,49 @@ async def install_release_on_all(
     asyncio.create_task(_batched_install())
 
     return {"tasks": tasks}
+
+
+# ── Desktop (Windows) Release Endpoints ──
+
+@router.get("/desktop-release")
+async def get_desktop_release(authorization: str = Header(default="")):
+    """Get the latest desktop (sync_server) release from poranos.com."""
+    token = authorization.replace("Bearer ", "") if authorization else ""
+
+    data = await _poranos_get("/app-releases/", token)
+    if data is None:
+        data = load_json("releases")
+    if data is None:
+        raise HTTPException(status_code=503, detail="No connection and no cached data")
+
+    # Filter for sync_server (desktop) releases
+    desktop = [r for r in data if r.get("app_type") == "sync_server" and r.get("is_active")]
+    if not desktop:
+        raise HTTPException(status_code=404, detail="No desktop release available")
+
+    latest = desktop[0]  # Already sorted by newest first from API
+    return latest
+
+
+@router.post("/desktop-release/{release_id}/download")
+async def download_desktop_release(
+    release_id: int,
+    authorization: str = Header(default=""),
+):
+    """Download desktop installer and return local file path for Electron to open."""
+    token = authorization.replace("Bearer ", "") if authorization else ""
+    release = await _fetch_release(release_id, token)
+
+    if release.get("app_type") != "sync_server":
+        raise HTTPException(status_code=400, detail="Not a desktop release")
+
+    # Download to local cache (pass expected size to invalidate stale cache)
+    file_path = await _download_apk(release["download_url"], release["file_name"], release.get("file_size", 0))
+    file_size = os.path.getsize(file_path)
+
+    return {
+        "file_path": file_path,
+        "file_name": release["file_name"],
+        "file_size": file_size,
+        "version": release["version"],
+    }

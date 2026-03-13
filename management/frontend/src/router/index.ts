@@ -1,7 +1,19 @@
 import { createRouter, createWebHistory } from 'vue-router'
 
 const routes = [
-  { path: '/', redirect: '/operation' },
+  {
+    path: '/',
+    redirect: () => {
+      try {
+        const raw = localStorage.getItem('poranos-settings')
+        if (raw) {
+          const s = JSON.parse(raw)
+          if (s.uiMode === 'advance') return '/operation'
+        }
+      } catch { /* ignore */ }
+      return '/portable'
+    },
+  },
   { path: '/dashboard', redirect: '/sync-server' },
   {
     path: '/sync-server',
@@ -42,6 +54,16 @@ const routes = [
     path: '/operation/:roomId/movie',
     name: 'MoviePlayer',
     component: () => import('@/views/MoviePlayerView.vue'),
+  },
+  {
+    path: '/portable',
+    name: 'Portable',
+    component: () => import('@/views/PortableView.vue'),
+  },
+  {
+    path: '/settings',
+    name: 'Settings',
+    component: () => import('@/views/SettingsView.vue'),
   },
 ]
 

@@ -145,7 +145,8 @@ function onKeydown(e: KeyboardEvent) {
 }
 
 onMounted(() => {
-  if (canvasRef.value) {
+  // デバイスがADB接続されていない場合は接続を試みない（タイムアウトループ防止）
+  if (canvasRef.value && props.device.status === 'device') {
     connect(streamSerial(), canvasRef.value)
   }
   window.addEventListener('keydown', onKeydown)
@@ -158,8 +159,17 @@ onUnmounted(() => {
 
 // デバイスが変わったら再接続
 watch(() => props.device.serial, () => {
-  if (canvasRef.value) {
+  if (canvasRef.value && props.device.status === 'device') {
     connect(streamSerial(), canvasRef.value)
+  }
+})
+
+// デバイスがオンラインになったら接続開始、オフラインになったら切断
+watch(() => props.device.status, (newStatus, oldStatus) => {
+  if (newStatus === 'device' && oldStatus !== 'device' && canvasRef.value) {
+    connect(streamSerial(), canvasRef.value)
+  } else if (newStatus !== 'device' && oldStatus === 'device') {
+    disconnect()
   }
 })
 </script>

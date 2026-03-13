@@ -22,6 +22,8 @@ _active_install_procs: dict[str, "asyncio.subprocess.Process"] = {}
 
 # コールバック: インストールタスク更新時にWebSocket通知用
 _on_task_update = None
+# コールバック: プロビジョニングイベント通知用
+_on_provision_event = None
 
 
 def set_task_update_callback(callback):
@@ -29,9 +31,19 @@ def set_task_update_callback(callback):
     _on_task_update = callback
 
 
+def set_provision_event_callback(callback):
+    global _on_provision_event
+    _on_provision_event = callback
+
+
 async def _notify_task_update(task: dict):
     if _on_task_update:
         await _on_task_update(task)
+
+
+async def _notify_provision_event(serial: str, message: str, level: str = "info"):
+    if _on_provision_event:
+        await _on_provision_event({"serial": serial, "message": message, "level": level})
 
 
 def _parse_wifi_devices(raw: str) -> list[str]:
@@ -117,7 +129,7 @@ class AdbService:
 
     async def _connect_wifi_devices(self):
         """WiFiデバイスに adb connect を実行（未接続のもののみ、バックオフ付き）"""
-        if not self._wifi_devices or settings.standalone:
+        if not self._wifi_devices:
             return
         tasks = []
         for addr in list(self._wifi_devices):
@@ -207,14 +219,14 @@ class AdbService:
             self._device_status[serial] = status
 
             if status != "device":
-                # WiFiデバイスがofflineなら連続カウント → 閾値超えでdisconnect
+                # WiFiデバイスは接続完了（device状態）するまで表示しない
                 if self._is_wifi_serial(serial):
                     self._wifi_offline_count[serial] = self._wifi_offline_count.get(serial, 0) + 1
                     if self._wifi_offline_count[serial] >= self._wifi_offline_threshold:
                         logger.info(f"WiFi device {serial} offline for {self._wifi_offline_count[serial]} polls, disconnecting")
                         await self._run_adb("disconnect", serial, timeout=5)
                         self._wifi_offline_count.pop(serial, None)
-                        continue  # デバイスリストに含めない
+                    continue  # WiFi非device → 常に非表示
                 devices.append({
                     "serial": serial,
                     "status": status,
@@ -289,15 +301,14 @@ class AdbService:
         # hw_serialが取れたUSBデバイスのシリアル集合
         active_hw_serials = set(by_hw.keys())
 
-        # hw_serialなしのWiFiデバイスを除外（対応するUSBデバイスが既にある場合）
+        # hw_serialなしのWiFiデバイスは常に非表示
+        # （hw_serialが取れればby_hwで統合される。取れないうちは重複カードになるため隠す）
         filtered_no_hw: list[dict] = []
         for dev in no_hw:
             serial = dev.get("serial", "")
-            if self._is_wifi_serial(serial):
-                hw = wifi_to_hw.get(serial)
-                if hw and hw in active_hw_serials:
-                    # USBデバイスが既にあるので重複カードを除外
-                    continue
+            adb_serial = dev.get("adb_serial", serial)
+            if self._is_wifi_serial(serial) or self._is_wifi_serial(adb_serial):
+                continue  # WiFi + hw_serialなし → 常に非表示
             filtered_no_hw.append(dev)
 
         merged: list[dict] = list(filtered_no_hw)
@@ -599,10 +610,13 @@ class AdbService:
             self._reverse_set.discard(serial)
 
     async def _provision_device(self, serial: str):
-        """デバイス初回接続時にスリープ防止＋近接センサー無効化＋WiFi ADB有効化（1回のみ）"""
-        if serial in self._provisioned_set:
-            return
-        # 基本プロビジョニング（軽量、確実に成功する）
+        """デバイス接続時にスリープ防止＋近接センサー無効化＋WiFi ADB有効化
+
+        基本プロビジョニング（setprop, am broadcast）は揮発性のため毎回実行する。
+        hw_serial書き込み、pm grant、WiFi ADB等は1回だけで十分なのでスキップする。
+        """
+        already_provisioned = serial in self._provisioned_set
+        # 基本プロビジョニング（冪等・揮発性のため毎回実行）
         cmd = (
             "settings put global stay_on_while_plugged_in 3; "
             "settings put system screen_off_timeout 86400000; "
@@ -613,11 +627,23 @@ class AdbService:
             "-s", serial, "shell", cmd, timeout=8
         )
         if rc == 0:
+            if not already_provisioned:
+                logger.info(f"Device provisioned (no-sleep + proximity off + boundary off) for {serial}")
+                await _notify_provision_event(serial, "スリープ防止を設定しました")
+                await _notify_provision_event(serial, "近接センサーを無効化しました")
+                await _notify_provision_event(serial, "境界線を無効化しました")
+            else:
+                logger.debug(f"Device re-provisioned (volatile settings refreshed) for {serial}")
             self._provisioned_set.add(serial)
-            logger.info(f"Device provisioned (no-sleep + proximity off + boundary off) for {serial}")
         else:
             logger.warning(f"Device provisioning failed for {serial}: {stderr}")
+            if not already_provisioned:
+                await _notify_provision_event(serial, f"プロビジョニング失敗: {stderr[:100]}", "error")
             return  # 基本プロビジョニング失敗なら以降もスキップ
+
+        # 以降は1回だけ実行すれば十分な操作
+        if already_provisioned:
+            return
 
         # hw_serial ファイル書き込み（Unityアプリがデバイスシリアルを読めるようにする）
         package = "com.Krelations.Poranos_LT"
@@ -635,6 +661,7 @@ class AdbService:
             _, _, rc2 = await self._run_adb("-s", serial, "shell", serial_cmd, timeout=5)
             if rc2 == 0:
                 logger.info(f"Serial file written for {serial}: {hw_serial_for_file}")
+                await _notify_provision_event(serial, f"シリアル番号を書き込みました: {hw_serial_for_file}")
             else:
                 logger.warning(f"Failed to write serial file for {serial}")
 
@@ -646,6 +673,7 @@ class AdbService:
         )
         if rc == 0:
             logger.info(f"WRITE_SECURE_SETTINGS granted for {serial}")
+            await _notify_provision_event(serial, "WRITE_SECURE_SETTINGS権限を付与しました")
         elif "has not requested permission" in stderr:
             pass  # APKにまだ権限宣言がない場合は無視
         else:
@@ -654,11 +682,6 @@ class AdbService:
         # WiFi接続のデバイスはそのアドレスをWiFiリストに登録（再起動後も再接続可能にする）
         if self._is_wifi_serial(serial):
             self.add_wifi_device(serial)
-            return
-
-        # スタンドアロンモードではWiFi ADB切り替えをスキップ
-        # (tcpip 5555がUSB接続をリセットし、scrcpy等と競合するため)
-        if settings.standalone:
             return
 
         # USB接続のデバイスにWiFi ADBを有効化（USB切断後もWiFiで接続可能にする）
@@ -697,7 +720,11 @@ class AdbService:
             if line.startswith("inet "):
                 ip = line.split()[1].split("/")[0]
                 addr = self.add_wifi_device(ip)
+                # USB→WiFiマッピングを先行登録（デバイスカード統合で使用）
+                self._hw_to_wifi[serial] = addr
+                self._hw_to_usb[serial] = serial
                 logger.info(f"Auto-registered WiFi device {addr} for USB serial {serial}")
+                await _notify_provision_event(serial, f"WiFi IP {ip} を登録しました")
                 return
 
     async def _get_prop(self, serial: str, prop: str) -> Optional[str]:

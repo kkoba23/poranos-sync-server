@@ -5,7 +5,7 @@ import os
 import aiofiles
 from fastapi import APIRouter, UploadFile, File, WebSocket, WebSocketDisconnect
 
-from services.adb_service import AdbService, set_task_update_callback
+from services.adb_service import AdbService, set_task_update_callback, set_provision_event_callback
 from config import settings
 
 logger = logging.getLogger(__name__)
@@ -36,6 +36,22 @@ async def _broadcast_task_update(task: dict):
 
 
 set_task_update_callback(_broadcast_task_update)
+
+
+async def _broadcast_provision_event(event: dict):
+    """プロビジョニングイベントをWebSocketクライアントに通知"""
+    msg = {"type": "provision_event", **event}
+    disconnected = []
+    for ws in _device_ws_clients:
+        try:
+            await ws.send_json(msg)
+        except Exception:
+            disconnected.append(ws)
+    for ws in disconnected:
+        _device_ws_clients.remove(ws)
+
+
+set_provision_event_callback(_broadcast_provision_event)
 
 
 @router.get("")

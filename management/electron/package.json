@@ -49,15 +49,29 @@
         }
       ],
       "icon": "poranos.ico",
-      "signAndEditExecutable": false
+      "forceCodeSigning": false
     },
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
-      "installerIcon": "poranos.ico"
+      "installerIcon": "poranos.ico",
+      "include": "installer.nsh"
     },
     "portable": {
       "artifactName": "PoranosManagement-${version}-portable.exe"
+    },
+    "mac": {
+      "target": [
+        {
+          "target": "dmg",
+          "arch": ["arm64"]
+        }
+      ],
+      "icon": "poranos.ico",
+      "category": "public.app-category.developer-tools"
+    },
+    "dmg": {
+      "artifactName": "PoranosManagement-${version}-arm64.dmg"
     }
   }
 }
