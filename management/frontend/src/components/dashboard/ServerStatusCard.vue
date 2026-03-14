@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { useServerControl } from '@/composables/useServerControl'
+import { useI18n } from '@/i18n'
 
+const { t } = useI18n()
 const { status, loading, start, stop, restart } = useServerControl()
 
 function formatUptime(seconds?: number): string {
@@ -18,21 +20,21 @@ function formatUptime(seconds?: number): string {
       <div class="flex items-center gap-1">
         <span class="status-dot" :class="status.status"></span>
         <div>
-          <div style="font-weight: 600">Sync Server</div>
+          <div style="font-weight: 600">{{ t('server.syncServer') }}</div>
           <div style="font-size: 0.8rem; color: var(--text-secondary)">
-            {{ status.status }} &middot; Uptime: {{ formatUptime(status.uptime_seconds) }}
+            {{ status.status }} &middot; {{ t('server.uptime') }}: {{ formatUptime(status.uptime_seconds) }}
           </div>
         </div>
       </div>
       <div class="flex gap-1">
         <button class="btn btn-success btn-sm" :disabled="loading || status.status === 'running'" @click="start">
-          Start
+          {{ t('server.start') }}
         </button>
         <button class="btn btn-danger btn-sm" :disabled="loading || status.status !== 'running'" @click="stop">
-          Stop
+          {{ t('server.stop') }}
         </button>
         <button class="btn btn-warning btn-sm" :disabled="loading" @click="restart">
-          Restart
+          {{ t('server.restart') }}
         </button>
       </div>
     </div>

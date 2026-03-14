@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import { useI18n } from '@/i18n'
 import { Line } from 'vue-chartjs'
 import {
   Chart as ChartJS,
@@ -15,6 +16,8 @@ import 'chartjs-adapter-date-fns'
 import type { MetricsSnapshot } from '@/types'
 
 ChartJS.register(LineElement, PointElement, LinearScale, TimeScale, Title, Tooltip, Legend)
+
+const { t } = useI18n()
 
 const props = defineProps<{
   history: MetricsSnapshot[]
@@ -73,7 +76,7 @@ const chartOptions = {
 
 <template>
   <div class="card">
-    <div class="card-title">Latency</div>
+    <div class="card-title">{{ t('chart.latency') }}</div>
     <div style="height: 200px">
       <Line :data="chartData" :options="chartOptions" />
     </div>

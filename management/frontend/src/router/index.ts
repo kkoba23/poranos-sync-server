@@ -42,18 +42,24 @@ const routes = [
   },
   {
     path: '/operation',
-    name: 'Operation',
-    component: () => import('@/views/OperationView.vue'),
-  },
-  {
-    path: '/operation/:roomId/files',
-    name: 'FilePlayer',
-    component: () => import('@/views/FilePlayerView.vue'),
-  },
-  {
-    path: '/operation/:roomId/movie',
-    name: 'MoviePlayer',
-    component: () => import('@/views/MoviePlayerView.vue'),
+    component: () => import('@/views/OperationLayout.vue'),
+    children: [
+      {
+        path: '',
+        name: 'Operation',
+        component: () => import('@/views/OperationView.vue'),
+      },
+      {
+        path: ':roomId/files',
+        name: 'FilePlayer',
+        component: () => import('@/views/FilePlayerView.vue'),
+      },
+      {
+        path: ':roomId/movie',
+        name: 'MoviePlayer',
+        component: () => import('@/views/MoviePlayerView.vue'),
+      },
+    ],
   },
   {
     path: '/portable',

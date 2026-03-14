@@ -14,7 +14,7 @@ let mainWindow = null
 let logStream = null
 
 function getLogPath() {
-  return path.join(app.getPath('userData'), 'poranos-management.log')
+  return path.join(app.getPath('userData'), 'poranos-desktop.log')
 }
 
 function log(msg) {
@@ -146,7 +146,7 @@ function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1400,
     height: 900,
-    title: 'Poranos Management',
+    title: 'Poranos Desktop',
     icon: path.join(__dirname, 'poranos.ico'),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),

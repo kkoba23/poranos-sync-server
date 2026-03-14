@@ -67,6 +67,8 @@ class AdbService:
         self._device_status: dict[str, str] = {}
         self._reverse_set: set[str] = set()
         self._provisioned_set: set[str] = set()
+        # display serial単位で通知済みを追跡（USB+WiFi重複防止）
+        self._provision_notified: set[str] = set()
         self._wifi_devices: list[str] = _parse_wifi_devices(settings.wifi_devices)
         # config由来のWiFiデバイス（自動削除しない）
         self._wifi_persistent: set[str] = set(self._wifi_devices)
@@ -266,6 +268,8 @@ class AdbService:
         # 切断されたデバイスをトラッキングから除去
         self._reverse_set &= current_serials
         self._provisioned_set &= current_serials
+        # display serial単位の通知済みセットもクリア（切断されたデバイス分）
+        self._provision_notified &= {dev["serial"] for dev in devices}
         self._wifi_connected &= current_serials
         for serial in list(self._device_status):
             if serial not in current_serials:
@@ -400,6 +404,8 @@ class AdbService:
                 dev["sync_connected_via"] = info["connectedVia"]
                 if info.get("account"):
                     dev["app_account"] = info["account"]
+                if info.get("app_mode"):
+                    dev["app_mode"] = info["app_mode"]
             else:
                 dev["sync_connected"] = False
 
@@ -422,7 +428,7 @@ class AdbService:
             f"echo '==STORAGE=='; "
             f"df /data | tail -1; "
             f"echo '==ACCOUNT=='; "
-            f"run-as {package} sh -c 'cat /data/data/{package}/shared_prefs/*.playerprefs.xml 2>/dev/null' | grep -o '\"Account\"[^<]*<string>[^<]*' | sed 's/.*<string>//' | head -1; "
+            f"cat /sdcard/Android/data/{package}/files/account_settings.json 2>/dev/null | grep -o '\"email\"[^,]*' | sed 's/.*: *\"//;s/\"//' | head -1; "
             f"echo '==END=='"
         )
         shell_task = self._run_adb(
@@ -616,6 +622,14 @@ class AdbService:
         hw_serial書き込み、pm grant、WiFi ADB等は1回だけで十分なのでスキップする。
         """
         already_provisioned = serial in self._provisioned_set
+        # display serial解決（hw_serialがあればそちらを使用、USB+WiFi重複通知防止）
+        display_serial = serial
+        if self._is_wifi_serial(serial):
+            # WiFiシリアルの場合、hw_serialマッピングからdisplay serialを解決
+            for hw, wifi in self._hw_to_wifi.items():
+                if wifi == serial:
+                    display_serial = hw
+                    break
         # 基本プロビジョニング（冪等・揮発性のため毎回実行）
         cmd = (
             "settings put global stay_on_while_plugged_in 3; "
@@ -629,16 +643,17 @@ class AdbService:
         if rc == 0:
             if not already_provisioned:
                 logger.info(f"Device provisioned (no-sleep + proximity off + boundary off) for {serial}")
-                await _notify_provision_event(serial, "スリープ防止を設定しました")
-                await _notify_provision_event(serial, "近接センサーを無効化しました")
-                await _notify_provision_event(serial, "境界線を無効化しました")
+                # display serial単位で重複通知防止
+                if display_serial not in self._provision_notified:
+                    self._provision_notified.add(display_serial)
+                    await _notify_provision_event(display_serial, "プロビジョニング完了", "success")
             else:
                 logger.debug(f"Device re-provisioned (volatile settings refreshed) for {serial}")
             self._provisioned_set.add(serial)
         else:
             logger.warning(f"Device provisioning failed for {serial}: {stderr}")
             if not already_provisioned:
-                await _notify_provision_event(serial, f"プロビジョニング失敗: {stderr[:100]}", "error")
+                await _notify_provision_event(display_serial, f"プロビジョニング失敗: {stderr[:100]}", "error")
             return  # 基本プロビジョニング失敗なら以降もスキップ
 
         # 以降は1回だけ実行すれば十分な操作
@@ -926,6 +941,19 @@ class AdbService:
             return {"success": True, "message": "Rebooting"}
         else:
             logger.error(f"Reboot failed on {serial}: {(stdout + stderr).strip()[:200]}")
+            return {"success": False, "message": (stdout + stderr).strip()[:200]}
+
+    async def shutdown(self, serial: str) -> dict:
+        """デバイスをシャットダウンする。"""
+        stdout, stderr, rc = await self._run_adb(
+            "-s", serial, "shell", "svc", "power", "shutdown",
+            timeout=15,
+        )
+        if rc == 0:
+            logger.info(f"Device shutting down: {serial}")
+            return {"success": True, "message": "Shutting down"}
+        else:
+            logger.error(f"Shutdown failed on {serial}: {(stdout + stderr).strip()[:200]}")
             return {"success": False, "message": (stdout + stderr).strip()[:200]}
 
     async def send_keyevent(self, serial: str, keycode: int) -> dict:

@@ -236,6 +236,25 @@ body {
   background: rgba(239, 68, 68, 0.15) !important;
 }
 
+.btn-success-outline {
+  border-color: var(--success) !important;
+  color: var(--success) !important;
+  background: rgba(34, 197, 94, 0.1) !important;
+}
+
+.btn-success-outline:hover:not(:disabled) {
+  background: rgba(34, 197, 94, 0.2) !important;
+}
+
+.btn-off-outline {
+  border-color: var(--text-secondary) !important;
+  color: var(--text-secondary) !important;
+}
+
+.btn-off-outline:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.05) !important;
+}
+
 .volume-slider {
   flex: 1;
   height: 4px;

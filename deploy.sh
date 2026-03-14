@@ -1,8 +1,8 @@
 #!/bin/bash
 # =============================================================================
-# Poranos Sync Server デプロイスクリプト (Docker版)
+# Poranos Desktop デプロイスクリプト (Docker版)
 #
-# sync serverはDockerコンテナ `poranos-sync-server` で動作。
+# sync serverはDockerコンテナ `poranos-desktop-sync` で動作。
 # ホスト上で直接pythonを起動しないこと（ポート競合の原因になる）。
 #
 # 使い方:
@@ -22,9 +22,9 @@ REMOTE_USER="smacan"
 REMOTE_HOST="192.168.8.10"
 REMOTE_PORT=8765
 SSH_TARGET="${REMOTE_USER}@${REMOTE_HOST}"
-CONTAINER_NAME="poranos-sync-server"
+CONTAINER_NAME="poranos-desktop-sync"
 # ホスト上のステージングディレクトリ（SCPでファイルを送り、docker cpでコンテナにコピー）
-STAGING_DIR="C:/Services/poranos-sync"
+STAGING_DIR="C:/Services/poranos-desktop"
 
 # ローカルのServerディレクトリ
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -74,7 +74,7 @@ docker_status() {
     ssh_run "docker inspect -f '{{.State.Status}}' ${CONTAINER_NAME} 2>nul"
 }
 
-echo "=== Poranos Sync Server (Docker) ==="
+echo "=== Poranos Desktop (Docker) ==="
 echo "Target: ${SSH_TARGET}  Container: ${CONTAINER_NAME}"
 echo ""
 

@@ -18,7 +18,7 @@ from fastapi.responses import FileResponse
 
 from config import settings
 from services.cache_service import (
-    save_json, load_json,
+    save_json, load_json, has_json,
     download_and_cache_thumbnail, get_thumbnail_path, has_thumbnail,
 )
 
@@ -34,9 +34,24 @@ _download_semaphore = asyncio.Semaphore(5)
 _last_failure_time: float = 0
 _OFFLINE_COOLDOWN = 30  # seconds — retry API after this many seconds
 
+# Force-offline mode: persist across restarts via cache file
+def _load_force_offline() -> bool:
+    try:
+        data = load_json("force_offline")
+        return bool(data.get("enabled")) if data else False
+    except Exception:
+        return False
+
+_force_offline: bool = _load_force_offline()
+
+# Cache progress tracking
+_cache_progress = {"total": 0, "done": 0, "active": False}
+
 
 def _is_offline() -> bool:
-    """Return True if we recently failed to reach poranos.com."""
+    """Return True if we recently failed to reach poranos.com or force-offline is enabled."""
+    if _force_offline:
+        return True
     if _last_failure_time == 0:
         return False
     return (time.monotonic() - _last_failure_time) < _OFFLINE_COOLDOWN
@@ -53,7 +68,7 @@ async def _poranos_get(endpoint: str, token: str) -> dict | list | None:
         headers = {"Accept": "application/json"}
         if token:
             headers["Authorization"] = f"Bearer {token}"
-        async with httpx.AsyncClient(timeout=10, follow_redirects=True) as client:
+        async with httpx.AsyncClient(timeout=3, follow_redirects=True) as client:
             resp = await client.get(
                 f"{PORANOS_API}{endpoint}",
                 headers=headers,
@@ -68,32 +83,21 @@ async def _poranos_get(endpoint: str, token: str) -> dict | list | None:
     return None
 
 
-async def _cache_room_thumbnails(rooms: list) -> list:
-    """Download and cache room thumbnails (concurrency limited)."""
-    tasks = []
-    for room in rooms:
-        for size_key, size_label in [("thumbnail_large_url", "large"), ("thumbnail_mini_url", "mini")]:
-            url = room.get(size_key)
-            if url:
-                tasks.append((room, size_key, size_label, url))
-
-    async def _download(room, size_key, size_label, url):
-        async with _download_semaphore:
-            await download_and_cache_thumbnail(url, "room", room["id"], size_label)
-
-    await asyncio.gather(*[_download(*t) for t in tasks], return_exceptions=True)
-    return rooms
-
-
 async def _cache_file_thumbnails(files: list) -> list:
-    """Download and cache file thumbnails (concurrency limited)."""
+    """Download and cache file thumbnails (concurrency limited). Skips already cached.
+    Used by get_files endpoint for individual room file caching (not tracked in progress bar).
+    """
     tasks = []
     for f in files:
+        fid = f.get("id")
         thumb = f.get("thumbnail") or {}
         for size_key, size_label in [("large_url", "large"), ("mini_url", "mini")]:
             url = thumb.get(size_key)
-            if url:
+            if url and not has_thumbnail("file", fid, size_label):
                 tasks.append((f, size_key, size_label, url))
+
+    if not tasks:
+        return files
 
     async def _download(f, size_key, size_label, url):
         async with _download_semaphore:
@@ -103,29 +107,124 @@ async def _cache_file_thumbnails(files: list) -> list:
     return files
 
 
-def _rewrite_room_thumbnail_urls(rooms: list) -> list:
-    """Replace remote S3 URLs with local proxy URLs."""
+def _rewrite_room_thumbnail_urls(rooms: list, offline: bool = False) -> list:
+    """Replace remote S3 URLs with local proxy URLs and add cache status."""
     for room in rooms:
         rid = room.get("id")
-        if has_thumbnail("room", rid, "large"):
+        has_large = has_thumbnail("room", rid, "large")
+        has_mini = has_thumbnail("room", rid, "mini")
+        if has_large:
             room["thumbnail_large_url"] = f"/api/poranos/thumbnails/room/{rid}/large"
-        if has_thumbnail("room", rid, "mini"):
+        elif offline:
+            room["thumbnail_large_url"] = None
+        if has_mini:
             room["thumbnail_mini_url"] = f"/api/poranos/thumbnails/room/{rid}/mini"
+        elif offline:
+            room["thumbnail_mini_url"] = None
+        # True if cached, or if no thumbnail URL exists (nothing to cache)
+        has_any_url = bool(room.get("thumbnail_large_url") or room.get("thumbnail_mini_url"))
+        room["files_cached"] = (has_large or has_mini) if has_any_url else True
     return rooms
 
 
-def _rewrite_file_thumbnail_urls(files: list) -> list:
-    """Replace remote S3 URLs with local proxy URLs."""
+def _rewrite_file_thumbnail_urls(files: list, offline: bool = False) -> list:
+    """Replace remote S3 URLs with local proxy URLs and add cache status."""
     for f in files:
         fid = f.get("id")
         thumb = f.get("thumbnail")
-        if not thumb:
-            continue
-        if has_thumbnail("file", fid, "large"):
-            thumb["large_url"] = f"/api/poranos/thumbnails/file/{fid}/large"
-        if has_thumbnail("file", fid, "mini"):
-            thumb["mini_url"] = f"/api/poranos/thumbnails/file/{fid}/mini"
+        has_large = has_thumbnail("file", fid, "large")
+        has_mini = has_thumbnail("file", fid, "mini")
+        if thumb:
+            if has_large:
+                thumb["large_url"] = f"/api/poranos/thumbnails/file/{fid}/large"
+            elif offline:
+                thumb["large_url"] = None
+            if has_mini:
+                thumb["mini_url"] = f"/api/poranos/thumbnails/file/{fid}/mini"
+            elif offline:
+                thumb["mini_url"] = None
+        # True if cached, or if no thumbnail URL exists (nothing to cache)
+        thumb_urls = thumb and (thumb.get("large_url") or thumb.get("mini_url"))
+        f["thumbnail_cached"] = (has_large or has_mini) if thumb_urls else True
     return files
+
+
+
+async def _background_cache_all(rooms: list, token: str) -> None:
+    """Wrapper that tracks overall progress for room + file thumbnail caching."""
+    _cache_progress["total"] = 0
+    _cache_progress["done"] = 0
+    _cache_progress["active"] = True
+    try:
+        # Phase 1: count all uncached room thumbnails
+        room_tasks = []
+        for room in rooms:
+            rid = room.get("id")
+            for size_key, size_label in [("thumbnail_large_url", "large"), ("thumbnail_mini_url", "mini")]:
+                url = room.get(size_key)
+                if url and not has_thumbnail("room", rid, size_label):
+                    room_tasks.append((room, size_key, size_label, url))
+
+        # Phase 2: fetch file list once (API returns same files for all rooms) and count uncached
+        file_tasks_map = {}  # (fid, size_label) -> (file_dict, size_key, size_label, url) — dedup
+        all_files = None
+        # Try loading from any existing cache first
+        for room in rooms:
+            rid = room.get("id")
+            if rid and has_json(f"files_{rid}"):
+                all_files = load_json(f"files_{rid}") or []
+                break
+        # If no cache, fetch once from API
+        if all_files is None:
+            first_rid = rooms[0].get("id") if rooms else None
+            if first_rid:
+                try:
+                    all_files = await _poranos_get(f"/files/?room_id={first_rid}", token)
+                except Exception as e:
+                    log.warning(f"[proxy] background fetch files failed: {e}")
+        if all_files:
+            # Save file JSON for all rooms (same data)
+            for room in rooms:
+                rid = room.get("id")
+                if rid and not has_json(f"files_{rid}"):
+                    save_json(f"files_{rid}", all_files)
+            # Count uncached thumbnails
+            for f in all_files:
+                fid = f.get("id")
+                thumb = f.get("thumbnail") or {}
+                for size_key, size_label in [("large_url", "large"), ("mini_url", "mini")]:
+                    key = (fid, size_label)
+                    if key in file_tasks_map:
+                        continue
+                    url = thumb.get(size_key)
+                    if url and not has_thumbnail("file", fid, size_label):
+                        file_tasks_map[key] = (f, size_key, size_label, url)
+        file_tasks = list(file_tasks_map.values())
+
+        total = len(room_tasks) + len(file_tasks)
+        _cache_progress["total"] = total
+
+        if total == 0:
+            return
+
+        # Phase 3: download all thumbnails
+        async def _download_room(room, size_key, size_label, url):
+            async with _download_semaphore:
+                await download_and_cache_thumbnail(url, "room", room["id"], size_label)
+            _cache_progress["done"] += 1
+
+        async def _download_file(f, size_key, size_label, url):
+            async with _download_semaphore:
+                await download_and_cache_thumbnail(url, "file", f["id"], size_label)
+            _cache_progress["done"] += 1
+
+        await asyncio.gather(
+            *[_download_room(*t) for t in room_tasks],
+            *[_download_file(*t) for t in file_tasks],
+            return_exceptions=True,
+        )
+    finally:
+        _cache_progress["active"] = False
 
 
 # ── Endpoints ──
@@ -140,14 +239,14 @@ async def get_rooms(authorization: str = Header(default="")):
     if data is not None:
         # Online: cache JSON immediately, download thumbnails in background
         save_json("rooms", data)
-        asyncio.create_task(_cache_room_thumbnails(data))
+        asyncio.create_task(_background_cache_all(data, token))
         data = _rewrite_room_thumbnail_urls(data)
         return {"source": "online", "data": data}
 
     # Offline: load from cache
     cached = load_json("rooms")
     if cached is not None:
-        cached = _rewrite_room_thumbnail_urls(cached)
+        cached = _rewrite_room_thumbnail_urls(cached, offline=True)
         return {"source": "cache", "data": cached}
 
     raise HTTPException(status_code=503, detail="No connection and no cached data")
@@ -168,7 +267,7 @@ async def get_files(room_id: int, authorization: str = Header(default="")):
 
     cached = load_json(f"files_{room_id}")
     if cached is not None:
-        cached = _rewrite_file_thumbnail_urls(cached)
+        cached = _rewrite_file_thumbnail_urls(cached, offline=True)
         return {"source": "cache", "data": cached}
 
     raise HTTPException(status_code=503, detail="No connection and no cached data")
@@ -185,6 +284,32 @@ async def get_thumbnail(category: str, item_id: int, size: str):
         raise HTTPException(status_code=404, detail="Thumbnail not cached")
 
     return FileResponse(str(path), media_type="image/jpeg")
+
+
+# ── Cache status ──
+
+@router.get("/cache-status")
+async def get_cache_status():
+    """Get background cache download progress."""
+    return _cache_progress
+
+
+# ── Offline simulation ──
+
+@router.get("/offline-mode")
+async def get_offline_mode():
+    """Get current force-offline mode status."""
+    return {"force_offline": _force_offline}
+
+
+@router.post("/offline-mode")
+async def set_offline_mode(body: dict):
+    """Toggle force-offline mode for cache testing."""
+    global _force_offline
+    _force_offline = bool(body.get("force_offline", False))
+    save_json("force_offline", {"enabled": _force_offline})
+    log.info(f"[proxy] force-offline mode: {_force_offline}")
+    return {"force_offline": _force_offline}
 
 
 # ── APK Release Endpoints ──
@@ -207,6 +332,23 @@ async def get_releases(authorization: str = Header(default="")):
     raise HTTPException(status_code=503, detail="No connection and no cached data")
 
 
+async def _broadcast_download_progress(percent: int, file_name: str):
+    """Broadcast APK download progress through the devices WebSocket."""
+    try:
+        from routers.devices import _device_ws_clients
+        msg = {"type": "apk_download_progress", "percent": percent, "file_name": file_name}
+        disconnected = []
+        for ws_client in _device_ws_clients:
+            try:
+                await ws_client.send_json(msg)
+            except Exception:
+                disconnected.append(ws_client)
+        for ws_client in disconnected:
+            _device_ws_clients.remove(ws_client)
+    except Exception:
+        pass
+
+
 async def _download_apk(download_url: str, file_name: str, expected_size: int = 0) -> str:
     """Download APK from presigned URL to local uploads directory. Returns local file path."""
     apk_dir = os.path.join(settings.upload_dir, "apk_releases")
@@ -225,16 +367,30 @@ async def _download_apk(download_url: str, file_name: str, expected_size: int = 
     # Encode spaces in URL path, but avoid double-encoding already-encoded chars
     parsed = urlparse(download_url)
     encoded_url = urlunparse(parsed._replace(path=quote(parsed.path, safe="/%")))
-    async with httpx.AsyncClient(timeout=300, follow_redirects=True) as client:
-        resp = await client.get(encoded_url)
-        if resp.status_code != 200:
-            raise HTTPException(
-                status_code=502,
-                detail=f"Failed to download APK: HTTP {resp.status_code}",
-            )
-        async with aiofiles.open(apk_path, "wb") as f:
-            await f.write(resp.content)
 
+    await _broadcast_download_progress(0, file_name)
+
+    async with httpx.AsyncClient(timeout=httpx.Timeout(10, read=300), follow_redirects=True) as client:
+        async with client.stream("GET", encoded_url) as resp:
+            if resp.status_code != 200:
+                raise HTTPException(
+                    status_code=502,
+                    detail=f"Failed to download APK: HTTP {resp.status_code}",
+                )
+            total = int(resp.headers.get("content-length", 0))
+            downloaded = 0
+            last_percent = -1
+            async with aiofiles.open(apk_path, "wb") as f:
+                async for chunk in resp.aiter_bytes(chunk_size=256 * 1024):
+                    await f.write(chunk)
+                    downloaded += len(chunk)
+                    if total > 0:
+                        percent = min(int(downloaded * 100 / total), 100)
+                        if percent != last_percent:
+                            last_percent = percent
+                            await _broadcast_download_progress(percent, file_name)
+
+    await _broadcast_download_progress(100, file_name)
     log.info(f"[releases] APK downloaded: {apk_path} ({os.path.getsize(apk_path)} bytes)")
     return apk_path
 
@@ -331,7 +487,7 @@ async def install_release_on_all(
 
 @router.get("/desktop-release")
 async def get_desktop_release(authorization: str = Header(default="")):
-    """Get the latest desktop (sync_server) release from poranos.com."""
+    """Get the latest desktop release from poranos.com."""
     token = authorization.replace("Bearer ", "") if authorization else ""
 
     data = await _poranos_get("/app-releases/", token)
@@ -340,8 +496,8 @@ async def get_desktop_release(authorization: str = Header(default="")):
     if data is None:
         raise HTTPException(status_code=503, detail="No connection and no cached data")
 
-    # Filter for sync_server (desktop) releases
-    desktop = [r for r in data if r.get("app_type") == "sync_server" and r.get("is_active")]
+    # Filter for desktop releases
+    desktop = [r for r in data if r.get("app_type") == "desktop" and r.get("is_active")]
     if not desktop:
         raise HTTPException(status_code=404, detail="No desktop release available")
 
@@ -358,7 +514,7 @@ async def download_desktop_release(
     token = authorization.replace("Bearer ", "") if authorization else ""
     release = await _fetch_release(release_id, token)
 
-    if release.get("app_type") != "sync_server":
+    if release.get("app_type") != "desktop":
         raise HTTPException(status_code=400, detail="Not a desktop release")
 
     # Download to local cache (pass expected size to invalidate stale cache)

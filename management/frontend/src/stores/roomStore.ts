@@ -12,6 +12,7 @@ export interface Room {
   order: number
   owner_email: string
   isAutoPlay?: boolean
+  files_cached?: boolean
 }
 
 export const useRoomStore = defineStore('roomStore', () => {
@@ -19,6 +20,7 @@ export const useRoomStore = defineStore('roomStore', () => {
   const selectedRoomId = ref<number | null>(null)
   const loading = ref(false)
   const operationPage = ref(0)
+  const operationTab = ref<'rooms' | 'manual'>('rooms')
   const dataSource = ref<'online' | 'cache' | ''>('')
 
   const selectedRoom = computed(() =>
@@ -54,5 +56,5 @@ export const useRoomStore = defineStore('roomStore', () => {
     selectedRoomId.value = id
   }
 
-  return { rooms, myRooms, selectedRoom, selectedRoomId, loading, operationPage, dataSource, loadRooms, setSelectedRoom }
+  return { rooms, myRooms, selectedRoom, selectedRoomId, loading, operationPage, operationTab, dataSource, loadRooms, setSelectedRoom }
 })

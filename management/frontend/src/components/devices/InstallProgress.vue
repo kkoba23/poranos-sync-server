@@ -1,6 +1,9 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import type { InstallTask } from '@/types'
+import { useI18n } from '@/i18n'
+
+const { t } = useI18n()
 
 const props = defineProps<{
   tasks: Map<string, InstallTask>
@@ -25,7 +28,7 @@ function statusColor(status: string): string {
 
 <template>
   <div class="card mt-1" v-if="taskList.length > 0">
-    <div class="card-title">Install Tasks</div>
+    <div class="card-title">{{ t('install.title') }}</div>
     <div class="task-list">
       <div v-for="task in taskList" :key="task.task_id" class="task-item">
         <div class="flex items-center justify-between">
@@ -44,7 +47,7 @@ function statusColor(status: string): string {
               class="btn-cancel"
               @click="emit('cancel', task.device_serial)"
             >
-              Cancel
+              {{ t('device.cancel') }}
             </button>
           </div>
         </div>

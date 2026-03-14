@@ -2,10 +2,14 @@
 import { ref, computed, onMounted } from 'vue'
 import { proxyGet, proxyPost } from '@/api/client'
 import type { AppRelease, Device, InstallTask } from '@/types'
+import { useI18n } from '@/i18n'
+
+const { t } = useI18n()
 
 const props = defineProps<{
   devices: Device[]
   installTasks: Map<string, InstallTask>
+  downloadProgress: { percent: number; file_name: string } | null
 }>()
 
 const emit = defineEmits<{
@@ -46,7 +50,7 @@ async function fetchReleases() {
   error.value = ''
   try {
     const result = await proxyGet<{ source: string; data: AppRelease[] }>('/api/poranos/releases')
-    releases.value = result.data.filter(r => !r.app_type || r.app_type !== 'sync_server')
+    releases.value = result.data.filter(r => !r.app_type || !r.app_type.startsWith('desktop'))
   } catch (e: any) {
     error.value = e.message || 'Failed to fetch releases'
   } finally {
@@ -86,32 +90,42 @@ defineExpose({ latestRelease, installRelease, isInstalling })
   <div class="card">
     <div class="flex items-center justify-between">
       <div class="card-title" style="margin: 0">
-        APK from Poranos.com
+        {{ t('release.title') }}
       </div>
       <button class="btn btn-secondary btn-sm" :disabled="loading" @click="fetchReleases">
-        {{ loading ? 'Loading...' : 'Refresh' }}
+        {{ loading ? t('release.loading') : t('release.refresh') }}
       </button>
+    </div>
+
+    <!-- Download progress bar -->
+    <div v-if="downloadProgress" class="download-progress mt-1">
+      <div class="download-progress-label">
+        {{ t('release.downloading') }} {{ downloadProgress.file_name }} — {{ downloadProgress.percent }}%
+      </div>
+      <div class="progress-bar">
+        <div class="progress-fill" :style="{ width: downloadProgress.percent + '%' }"></div>
+      </div>
     </div>
 
     <div v-if="error" class="error-msg mt-1">{{ error }}</div>
 
     <div v-if="releases.length === 0 && !loading && !error" class="empty-msg mt-1">
-      No releases available
+      {{ t('release.noReleases') }}
     </div>
 
     <!-- Update notification banner -->
     <div v-if="hasUpdateAvailable && latestRelease" class="update-banner mt-1">
       <div class="update-banner-text">
         <span class="update-icon">&#x2B06;</span>
-        New version available: <strong>v{{ latestRelease.version }}</strong>
-        <span class="update-count">({{ devicesNeedingUpdate }} device{{ devicesNeedingUpdate > 1 ? 's' : '' }} need update)</span>
+        {{ t('release.newVersion') }} <strong>v{{ latestRelease.version }}</strong>
+        <span class="update-count">({{ t('release.needUpdate', { count: devicesNeedingUpdate }) }})</span>
       </div>
       <button
         class="btn btn-primary btn-sm"
         :disabled="isInstalling || devices.length === 0"
         @click="installRelease(latestRelease.id)"
       >
-        {{ installingReleaseId === latestRelease.id ? 'Installing...' : 'Update All Devices' }}
+        {{ installingReleaseId === latestRelease.id ? t('device.installing') : t('release.updateAll') }}
       </button>
     </div>
 
@@ -126,7 +140,7 @@ defineExpose({ latestRelease, installRelease, isInstalling })
         <div class="release-info">
           <div class="release-header">
             <span class="release-version">v{{ release.version }}</span>
-            <span v-if="release === latestRelease" class="latest-badge">Latest</span>
+            <span v-if="release === latestRelease" class="latest-badge">{{ t('release.latest') }}</span>
           </div>
           <div class="release-meta">
             <span>{{ release.file_name }}</span>
@@ -140,7 +154,7 @@ defineExpose({ latestRelease, installRelease, isInstalling })
             :disabled="isInstalling || devices.length === 0"
             @click="installRelease(release.id)"
           >
-            {{ installingReleaseId === release.id ? 'Installing...' : 'Install All' }}
+            {{ installingReleaseId === release.id ? t('device.installing') : t('release.installAll') }}
           </button>
         </div>
       </div>
@@ -238,5 +252,24 @@ defineExpose({ latestRelease, installRelease, isInstalling })
 }
 .release-actions {
   flex-shrink: 0;
+}
+.download-progress {
+  padding: 0.5rem 0;
+}
+.download-progress-label {
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+  margin-bottom: 0.3rem;
+}
+.progress-bar {
+  height: 6px;
+  background: var(--border);
+  border-radius: 3px;
+  overflow: hidden;
+}
+.progress-fill {
+  height: 100%;
+  background: var(--accent);
+  transition: width 0.2s ease;
 }
 </style>

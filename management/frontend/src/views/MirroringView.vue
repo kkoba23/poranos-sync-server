@@ -3,8 +3,10 @@ import { ref, watch, onMounted, onUnmounted } from 'vue'
 import VideoPlayer from '@/components/mirroring/VideoPlayer.vue'
 import ScrcpyPlayer from '@/components/mirroring/ScrcpyPlayer.vue'
 import { useSignaling } from '@/composables/useSignaling'
+import { useI18n } from '@/i18n'
 import type { Device } from '@/types'
 
+const { t } = useI18n()
 const {
   activeStreams,
   availableDevices,
@@ -67,26 +69,26 @@ onUnmounted(() => {
 <template>
   <div>
     <div class="flex items-center justify-between mb-1">
-      <h1 class="page-title" style="margin-bottom: 0">Mirroring</h1>
+      <h1 class="page-title" style="margin-bottom: 0">{{ t('mirroring.title') }}</h1>
       <div class="header-actions">
         <div class="mode-toggle">
           <button
             class="btn btn-sm"
             :class="{ active: mirrorMode === 'native' }"
             @click="mirrorMode = 'native'"
-          >Native</button>
+          >{{ t('mirroring.native') }}</button>
           <button
             class="btn btn-sm"
             :class="{ active: mirrorMode === 'webrtc' }"
             @click="mirrorMode = 'webrtc'"
-          >WebRTC</button>
+          >{{ t('mirroring.webrtc') }}</button>
         </div>
         <button
           v-if="mirrorMode === 'webrtc'"
           class="btn btn-sm"
           @click="reconnect"
           :disabled="!wsConnected"
-        >Reconnect</button>
+        >{{ t('mirroring.reconnect') }}</button>
       </div>
     </div>
 
@@ -94,8 +96,8 @@ onUnmounted(() => {
     <template v-if="mirrorMode === 'native'">
       <div v-if="devices.length === 0" class="card">
         <div style="color: var(--text-secondary); padding: 0.5rem 0; text-align: center">
-          <template v-if="!devicesLoaded">Connecting...</template>
-          <template v-else>No devices connected.</template>
+          <template v-if="!devicesLoaded">{{ t('mirroring.connecting') }}</template>
+          <template v-else>{{ t('mirroring.noDevices') }}</template>
         </div>
       </div>
 
@@ -112,8 +114,8 @@ onUnmounted(() => {
     <template v-if="mirrorMode === 'webrtc'">
       <div v-if="activeStreams.length === 0" class="card">
         <div style="color: var(--text-secondary); padding: 0.5rem 0; text-align: center">
-          <template v-if="!wsConnected">Connecting to sync server...</template>
-          <template v-else>No devices streaming. Start WebRTCStreamer on a Quest 3.</template>
+          <template v-if="!wsConnected">{{ t('mirroring.connectingSync') }}</template>
+          <template v-else>{{ t('mirroring.noStreaming') }}</template>
         </div>
       </div>
 
@@ -129,10 +131,10 @@ onUnmounted(() => {
       </div>
 
       <div class="card mt-1" style="font-family: monospace; font-size: 0.75rem">
-        <div class="card-title">Debug Log</div>
+        <div class="card-title">{{ t('mirroring.debugLog') }}</div>
         <div style="max-height: 200px; overflow-y: auto; white-space: pre-wrap; color: var(--text-secondary)">
           <div v-for="(line, i) in debugLog" :key="i">{{ line }}</div>
-          <div v-if="debugLog.length === 0">No events yet</div>
+          <div v-if="debugLog.length === 0">{{ t('mirroring.noEvents') }}</div>
         </div>
       </div>
     </template>

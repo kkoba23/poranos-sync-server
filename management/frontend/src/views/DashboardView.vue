@@ -9,7 +9,9 @@ import RoomsList from '@/components/dashboard/RoomsList.vue'
 import ConfirmModal from '@/components/ConfirmModal.vue'
 import { useMetrics } from '@/composables/useMetrics'
 import { post } from '@/api/client'
+import { useI18n } from '@/i18n'
 
+const { t } = useI18n()
 const { current, history, connected } = useMetrics()
 
 const resetting = ref(false)
@@ -29,13 +31,13 @@ async function onReset() {
 <template>
   <div>
     <div class="flex items-center justify-between mb-1">
-      <h1 class="page-title">Sync Server</h1>
+      <h1 class="page-title">{{ t('dashboard.title') }}</h1>
       <div class="flex items-center" style="gap: 1rem;">
         <button class="btn btn-warning btn-sm" :disabled="resetting" @click="showResetConfirm = true">
-          {{ resetting ? 'Resetting...' : 'Reset Rooms' }}
+          {{ resetting ? t('dashboard.resetting') : t('dashboard.resetRooms') }}
         </button>
         <span :style="{ color: connected ? 'var(--success)' : 'var(--danger)' }">
-          {{ connected ? 'Live' : 'Disconnected' }}
+          {{ connected ? t('dashboard.live') : t('dashboard.disconnected') }}
         </span>
       </div>
     </div>
@@ -56,9 +58,9 @@ async function onReset() {
 
     <ConfirmModal
       v-if="showResetConfirm"
-      title="Reset Rooms"
-      message="Sync serverの全ルーム状態をリセットしますか？接続中のオブジェクト・シーンモデルが全てクリアされます。"
-      confirm-label="Reset"
+      :title="t('dashboard.resetTitle')"
+      :message="t('dashboard.resetMsg')"
+      :confirm-label="t('dashboard.reset')"
       :loading="resetting"
       @confirm="onReset(); showResetConfirm = false"
       @cancel="showResetConfirm = false"

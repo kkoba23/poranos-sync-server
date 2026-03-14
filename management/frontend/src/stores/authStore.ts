@@ -9,7 +9,7 @@ export const useAuthStore = defineStore('auth', () => {
   const initialized = ref(false)
   const error = ref('')
 
-  const userEmail = computed(() => user.value?.email || '')
+  const userEmail = computed(() => user.value?.email || localStorage.getItem('userEmail') || '')
 
   async function login(email: string, password: string) {
     error.value = ''
@@ -28,6 +28,7 @@ export const useAuthStore = defineStore('auth', () => {
 
       user.value = cred.user
       isAuthenticated.value = true
+      if (cred.user.email) localStorage.setItem('userEmail', cred.user.email)
     } catch (e: any) {
       switch (e.code) {
         case 'auth/invalid-credential':
@@ -45,20 +46,31 @@ export const useAuthStore = defineStore('auth', () => {
   }
 
   async function logout() {
+    // iframe内のporanos.comもログアウト
+    const manualIframe = document.querySelector('.manual-iframe') as HTMLIFrameElement | null
+    if (manualIframe?.contentWindow) {
+      manualIframe.contentWindow.postMessage({ type: 'poranos-auth-logout' }, 'https://poranos.com')
+    }
+
     const auth = getAuth()
     await signOut(auth)
     localStorage.removeItem('idToken')
+    localStorage.removeItem('userEmail')
     user.value = null
     isAuthenticated.value = false
   }
 
   function initAuth(): Promise<void> {
     return new Promise((resolve) => {
+      let resolved = false
+      const done = () => { if (!resolved) { resolved = true; resolve() } }
+
       const auth = getAuth()
       onAuthStateChanged(auth, async (firebaseUser) => {
         if (firebaseUser) {
           user.value = firebaseUser
           isAuthenticated.value = true
+          if (firebaseUser.email) localStorage.setItem('userEmail', firebaseUser.email)
           try {
             const token = await firebaseUser.getIdToken()
             localStorage.setItem('idToken', token)
@@ -68,8 +80,20 @@ export const useAuthStore = defineStore('auth', () => {
           isAuthenticated.value = false
         }
         initialized.value = true
-        resolve()
+        done()
       })
+
+      // Offline fallback: don't block app mount waiting for Firebase
+      setTimeout(() => {
+        if (!resolved) {
+          const cachedToken = localStorage.getItem('idToken')
+          if (cachedToken) {
+            isAuthenticated.value = true
+          }
+          initialized.value = true
+          done()
+        }
+      }, 3000)
     })
   }
 

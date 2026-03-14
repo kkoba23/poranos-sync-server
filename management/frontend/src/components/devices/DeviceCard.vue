@@ -2,6 +2,9 @@
 import { ref, watch, computed } from 'vue'
 import type { Device, InstallTask } from '@/types'
 import ConfirmModal from '@/components/ConfirmModal.vue'
+import { useI18n } from '@/i18n'
+
+const { t } = useI18n()
 
 const props = defineProps<{
   device: Device
@@ -16,10 +19,13 @@ const emit = defineEmits<{
   stop: []
   cancelInstall: []
   reboot: []
+  shutdown: []
   accountChange: []
+  modeChange: [mode: string]
 }>()
 
 const showRebootConfirm = ref(false)
+const showShutdownConfirm = ref(false)
 
 function batteryColor(level?: number): string {
   if (!level) return 'var(--text-secondary)'
@@ -54,7 +60,7 @@ const syncViaType = computed(() => {
 
 const syncViaLabel = computed(() => {
   const via = props.device.sync_connected_via || ''
-  return via.includes('localhost') ? 'adb reverse' : 'WiFi direct'
+  return via.includes('localhost') ? t('device.adbReverse') : t('device.wifiDirect')
 })
 
 const storageColor = computed(() => {
@@ -70,6 +76,18 @@ const storageColor = computed(() => {
 const isAccountSame = computed(() => {
   if (!props.userEmail || !props.device.app_account) return false
   return props.device.app_account === props.userEmail
+})
+
+const isMultiplayMode = computed(() => {
+  const m = props.device.app_mode || ''
+  return m === 'Multiplay' || m === 'MultiplayOnPre'
+})
+
+const modeLabel = computed(() => {
+  const m = props.device.app_mode || ''
+  if (m === 'Standalone') return t('device.modeStandalone')
+  if (m === 'Multiplay' || m === 'MultiplayOnPre') return t('device.modeMultiplay')
+  return m || '-'
 })
 
 async function sendVolume(volume: number) {
@@ -116,11 +134,11 @@ async function sendVolume(volume: number) {
 
     <div class="device-info">
       <div class="info-row">
-        <span class="info-label">Device</span>
+        <span class="info-label">{{ t('device.device') }}</span>
         <span class="info-value">{{ device.model }}</span>
       </div>
       <div class="info-row" v-if="device.battery_level != null">
-        <span class="info-label">Head Battery</span>
+        <span class="info-label">{{ t('device.headBattery') }}</span>
         <span class="info-value" :style="{ color: batteryColor(device.battery_level) }">
           {{ device.battery_level }}%
           <template v-if="device.battery_plugged">
@@ -129,13 +147,13 @@ async function sendVolume(volume: number) {
               :class="device.battery_weak_charger === false ? 'fast' : 'slow'"
               :title="device.battery_charging_ma ? `${device.battery_charging_ma}mA` : ''"
             >
-              &#x26A1;{{ device.battery_weak_charger === false ? 'Fast' : 'Slow' }}
+              &#x26A1;{{ device.battery_weak_charger === false ? t('device.fast') : t('device.slow') }}
             </span>
           </template>
         </span>
       </div>
       <div class="info-row" v-if="device.controller_left_battery != null || device.controller_right_battery != null">
-        <span class="info-label">Controller Batteries</span>
+        <span class="info-label">{{ t('device.controllerBatteries') }}</span>
         <span class="info-value controller-batteries">
           <span v-if="device.controller_left_battery != null" :style="{ color: batteryColor(device.controller_left_battery) }">
             L:{{ device.controller_left_battery }}%
@@ -146,50 +164,56 @@ async function sendVolume(volume: number) {
         </span>
       </div>
       <div class="info-row" v-if="device.wifi_ssid">
-        <span class="info-label">WiFi</span>
+        <span class="info-label">{{ t('device.wifi') }}</span>
         <span class="info-value">{{ device.wifi_ssid }}</span>
       </div>
       <div class="info-row">
-        <span class="info-label">Provisioned</span>
+        <span class="info-label">{{ t('device.provisioned') }}</span>
         <span class="info-value" :style="{ color: device.provisioned ? 'var(--success)' : 'var(--danger)' }">
-          {{ device.provisioned ? 'Yes' : 'No' }}
+          {{ device.provisioned ? t('device.yes') : t('device.no') }}
         </span>
       </div>
       <div class="info-row">
-        <span class="info-label">App</span>
+        <span class="info-label">{{ t('device.app') }}</span>
         <span class="info-value">
-          {{ device.app_installed ? `v${device.app_version || '?'}` : 'Not installed' }}
+          {{ device.app_installed ? `v${device.app_version || '?'}` : t('device.notInstalled') }}
         </span>
       </div>
       <div class="info-row">
         <span class="info-label">Poranos_LT</span>
         <span class="info-value" :style="{ color: device.app_running ? 'var(--success)' : 'var(--text-secondary)' }">
-          {{ device.app_running ? 'Running' : 'Stopped' }}
+          {{ device.app_running ? t('device.running') : t('device.stopped') }}
         </span>
       </div>
       <div class="info-row" v-if="device.app_account">
-        <span class="info-label">Account</span>
+        <span class="info-label">{{ t('device.account') }}</span>
         <span class="info-value account-value" :title="device.app_account">{{ device.app_account }}</span>
       </div>
       <div class="info-row" v-if="device.storage_total_gb != null">
-        <span class="info-label">Storage</span>
+        <span class="info-label">{{ t('device.storage') }}</span>
         <span class="info-value">
           <span :style="{ color: storageColor }">{{ device.storage_used_gb }}GB</span>
           <span style="color: var(--text-secondary)"> / {{ device.storage_total_gb }}GB</span>
         </span>
       </div>
       <div class="info-row">
-        <span class="info-label">Sync</span>
+        <span class="info-label">{{ t('device.sync') }}</span>
         <span class="info-value" :style="{ color: device.sync_connected ? 'var(--success)' : 'var(--text-secondary)' }">
           <template v-if="device.sync_connected">
-            Connected
+            {{ t('device.connected') }}
             <span class="sync-via-badge" :class="syncViaType">{{ syncViaLabel }}</span>
           </template>
-          <template v-else>Disconnected</template>
+          <template v-else>{{ t('device.disconnected') }}</template>
+        </span>
+      </div>
+      <div class="info-row" v-if="device.app_mode">
+        <span class="info-label">{{ t('device.appMode') }}</span>
+        <span class="info-value" :style="{ color: isMultiplayMode ? 'var(--success)' : 'var(--warning)' }">
+          {{ modeLabel }}
         </span>
       </div>
       <div class="volume-row" v-if="device.volume_music != null">
-        <span class="info-label">Volume</span>
+        <span class="info-label">{{ t('device.volume') }}</span>
         <div class="volume-control">
           <input
             type="range"
@@ -209,19 +233,19 @@ async function sendVolume(volume: number) {
     <div v-if="installTask && (installTask.status === 'installing' || installTask.status === 'queued')" class="install-status mt-1">
       <div class="flex items-center justify-between">
         <span class="install-status-text installing">
-          {{ installTask.status === 'queued' ? 'Queued...' : 'Installing...' }}
+          {{ installTask.status === 'queued' ? t('device.queued') : t('device.installing') }}
         </span>
-        <button class="btn-cancel-sm" @click="$emit('cancelInstall')">Cancel</button>
+        <button class="btn-cancel-sm" @click="$emit('cancelInstall')">{{ t('device.cancel') }}</button>
       </div>
       <div class="install-progress-bar">
         <div class="install-progress-fill indeterminate"></div>
       </div>
     </div>
     <div v-else-if="installTask && installTask.status === 'success'" class="install-status mt-1">
-      <span class="install-status-text success">Install complete</span>
+      <span class="install-status-text success">{{ t('device.installComplete') }}</span>
     </div>
     <div v-else-if="installTask && installTask.status === 'failed'" class="install-status mt-1">
-      <span class="install-status-text failed">Install failed</span>
+      <span class="install-status-text failed">{{ t('device.installFailed') }}</span>
       <span v-if="installTask.message" class="install-message">{{ installTask.message }}</span>
     </div>
 
@@ -233,7 +257,7 @@ async function sendVolume(volume: number) {
         :disabled="!device.app_installed || device.status !== 'device'"
         @click="$emit('launch')"
       >
-        Launch
+        {{ t('device.launch') }}
       </button>
       <button
         v-else
@@ -241,40 +265,71 @@ async function sendVolume(volume: number) {
         :disabled="device.status !== 'device'"
         @click="$emit('stop')"
       >
-        Stop
+        {{ t('device.stop') }}
       </button>
       <button
         class="btn btn-primary btn-sm"
         :disabled="!canInstall || device.status !== 'device'"
         @click="$emit('install')"
       >
-        Install APK
+        {{ t('device.installApk') }}
       </button>
       <button
         class="btn btn-account btn-sm"
         :disabled="!device.sync_connected || isAccountSame"
         @click="$emit('accountChange')"
-        :title="isAccountSame ? 'Already set to this account' : 'Set account from logged-in user'"
+        :title="isAccountSame ? t('device.accountSameTitle') : t('device.accountSetTitle')"
       >
-        Account Change
+        {{ t('device.accountChange') }}
+      </button>
+      <button
+        v-if="device.sync_connected && isMultiplayMode"
+        class="btn btn-mode-standalone btn-sm"
+        @click="$emit('modeChange', 'standalone')"
+      >
+        {{ t('device.switchToStandalone') }}
+      </button>
+      <button
+        v-if="device.sync_connected && !isMultiplayMode"
+        class="btn btn-mode-multiplay btn-sm"
+        @click="$emit('modeChange', 'multiplay')"
+      >
+        {{ t('device.switchToMultiplay') }}
       </button>
       <button
         class="btn btn-warning btn-sm"
         :disabled="device.status !== 'device'"
         @click="showRebootConfirm = true"
       >
-        Reboot
+        {{ t('device.reboot') }}
+      </button>
+      <button
+        class="btn btn-danger btn-sm"
+        :disabled="device.status !== 'device'"
+        @click="showShutdownConfirm = true"
+      >
+        {{ t('device.shutdown') }}
       </button>
     </div>
 
     <ConfirmModal
       v-if="showRebootConfirm"
-      title="Reboot Device"
-      :message="`${device.model} (${device.serial}) を再起動しますか？`"
-      confirm-label="Reboot"
+      :title="t('device.rebootTitle')"
+      :message="t('device.rebootMsg', { model: device.model, serial: device.serial })"
+      :confirm-label="t('device.reboot')"
       confirm-class="btn-warning"
       @confirm="showRebootConfirm = false; emit('reboot')"
       @cancel="showRebootConfirm = false"
+    />
+
+    <ConfirmModal
+      v-if="showShutdownConfirm"
+      :title="t('device.shutdownTitle')"
+      :message="t('device.shutdownMsg', { model: device.model, serial: device.serial })"
+      :confirm-label="t('device.shutdown')"
+      confirm-class="btn-danger"
+      @confirm="showShutdownConfirm = false; emit('shutdown')"
+      @cancel="showShutdownConfirm = false"
     />
   </div>
 </template>
@@ -495,6 +550,22 @@ async function sendVolume(volume: number) {
 .btn-account:disabled {
   opacity: 0.4;
   cursor: not-allowed;
+}
+.btn-mode-standalone {
+  background: var(--warning, #ff9800);
+  color: #1a1a2e;
+  border-color: var(--warning, #ff9800);
+}
+.btn-mode-standalone:hover:not(:disabled) {
+  opacity: 0.85;
+}
+.btn-mode-multiplay {
+  background: var(--success, #22c55e);
+  color: #fff;
+  border-color: var(--success, #22c55e);
+}
+.btn-mode-multiplay:hover:not(:disabled) {
+  opacity: 0.85;
 }
 .btn-cancel-sm {
   padding: 0.05rem 0.4rem;

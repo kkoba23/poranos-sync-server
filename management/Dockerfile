@@ -24,6 +24,7 @@ COPY management/*.py ./
 COPY management/routers/ ./routers/
 COPY management/services/ ./services/
 COPY management/models/ ./models/
+COPY management/vendor/ ./vendor/
 COPY --from=frontend-builder /app/frontend/dist ./static
 
 RUN mkdir -p /app/uploads

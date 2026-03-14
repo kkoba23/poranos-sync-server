@@ -107,28 +107,12 @@ const devicesLoaded = ref(false)
 const searchGracePeriod = ref(true)  // 起動後しばらくは「検索中」を表示
 let devicePollTimer: ReturnType<typeof setInterval> | null = null
 const toast = useToast()
-const prevProvisionedMap = new Map<string, boolean>()
-let suppressProvisionToast = true  // suppress during initial load
-
 async function fetchDevices(useCached = false) {
   try {
     const url = useCached ? '/api/devices/cached' : '/api/devices'
     const resp = await fetch(url)
     const data = await resp.json()
     const newDevices: Device[] = data.devices || []
-    // Detect provisioned state changes
-    if (!suppressProvisionToast) {
-      for (const d of newDevices) {
-        const was = prevProvisionedMap.get(d.serial)
-        if (d.provisioned && was !== true) {
-          toast.success(`[${d.serial}] プロビジョニング完了`)
-        }
-      }
-    }
-    prevProvisionedMap.clear()
-    for (const d of newDevices) {
-      prevProvisionedMap.set(d.serial, !!d.provisioned)
-    }
     devices.value = newDevices
     if (newDevices.length > 0) searchGracePeriod.value = false
   } catch { /* ignore */ }
@@ -139,8 +123,6 @@ onMounted(async () => {
   fetchAutoLaunch()
   await fetchDevices(true)
   await fetchDevices()
-  // Enable provisioning toasts after initial load
-  suppressProvisionToast = false
   devicePollTimer = setInterval(fetchDevices, 5000)
   // 10秒間はデバイス0台でも「検索中」を表示
   setTimeout(() => { searchGracePeriod.value = false }, 10000)
@@ -516,7 +498,7 @@ async function downloadAndInstall() {
               <span class="info-value" :style="{ color: batteryColor(device.battery_level) }">
                 {{ device.battery_level }}%
                 <span v-if="device.battery_plugged" class="charger-badge" :class="device.battery_weak_charger === false ? 'fast' : 'slow'">
-                  &#x26A1;{{ device.battery_weak_charger === false ? 'Fast' : 'Slow' }}
+                  &#x26A1;{{ device.battery_weak_charger === false ? t('device.fast') : t('device.slow') }}
                 </span>
               </span>
             </div>
@@ -598,7 +580,7 @@ async function downloadAndInstall() {
     <ConfirmModal
       v-if="rebootTarget"
       :title="t('portable.reboot')"
-      :message="`${rebootTarget.model} (${rebootTarget.serial}) を再起動しますか？`"
+      :message="t('device.rebootMsg', { model: rebootTarget.model, serial: rebootTarget.serial })"
       :confirm-label="t('portable.reboot')"
       confirm-class="btn-warning"
       @confirm="rebootDevice(rebootTarget!)"
@@ -609,7 +591,7 @@ async function downloadAndInstall() {
     <ConfirmModal
       v-if="showRebootAllConfirm"
       :title="t('portable.reboot')"
-      :message="`接続中の全デバイス（${devices.length}台）を再起動しますか？`"
+      :message="t('devices.rebootAllMsg', { count: devices.length })"
       :confirm-label="t('portable.reboot')"
       confirm-class="btn-warning"
       :loading="allRebooting"

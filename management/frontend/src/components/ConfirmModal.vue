@@ -1,4 +1,8 @@
 <script setup lang="ts">
+import { useI18n } from '@/i18n'
+
+const { t } = useI18n()
+
 defineProps<{
   title: string
   message: string
@@ -22,7 +26,7 @@ defineEmits<{
         <div class="modal-message">{{ message }}</div>
         <div class="modal-actions">
           <button v-if="!hideCancel" class="btn btn-secondary btn-sm" :disabled="loading" @click="$emit('cancel')">
-            Cancel
+            {{ t('modal.cancel') }}
           </button>
           <button
             class="btn btn-sm"
@@ -30,7 +34,7 @@ defineEmits<{
             :disabled="loading"
             @click="$emit('confirm')"
           >
-            {{ loading ? 'Processing...' : (confirmLabel || 'Confirm') }}
+            {{ loading ? t('modal.processing') : (confirmLabel || t('modal.confirm')) }}
           </button>
         </div>
       </div>

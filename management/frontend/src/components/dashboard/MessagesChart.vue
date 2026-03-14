@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import { useI18n } from '@/i18n'
 import { Bar } from 'vue-chartjs'
 import {
   Chart as ChartJS,
@@ -12,6 +13,8 @@ import {
 import type { MetricsSnapshot } from '@/types'
 
 ChartJS.register(BarElement, CategoryScale, LinearScale, Title, Tooltip)
+
+const { t } = useI18n()
 
 const props = defineProps<{
   metrics: MetricsSnapshot | null
@@ -56,7 +59,7 @@ const chartOptions = {
 
 <template>
   <div class="card">
-    <div class="card-title">Messages by Type</div>
+    <div class="card-title">{{ t('chart.messagesByType') }}</div>
     <div style="height: 200px">
       <Bar :data="chartData" :options="chartOptions" />
     </div>

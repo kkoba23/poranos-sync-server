@@ -93,3 +93,9 @@ async def download_and_cache_thumbnail(
 def has_thumbnail(category: str, item_id: int, size: str) -> bool:
     path = get_thumbnail_path(category, item_id, size)
     return path.exists() and path.stat().st_size > 0
+
+
+def has_json(key: str) -> bool:
+    """Check if a JSON cache file exists."""
+    path = CACHE_DIR / f"{key}.json"
+    return path.exists()

@@ -2,7 +2,9 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useAuthStore } from '@/stores/authStore'
 import { useFilesLibraryStore, type DownloadTask } from '@/stores/filesLibraryStore'
+import { useI18n } from '@/i18n'
 
+const { t } = useI18n()
 const auth = useAuthStore()
 const store = useFilesLibraryStore()
 
@@ -65,19 +67,19 @@ const recentTasks = computed(() => {
 <template>
   <div class="files-view">
     <div class="files-header">
-      <h1>Files</h1>
+      <h1>{{ t('files.title') }}</h1>
       <span v-if="auth.userEmail" class="files-email">{{ auth.userEmail }}</span>
       <button
         v-if="!store.loading"
         class="btn-refresh"
         @click="auth.userEmail && store.loadFiles(auth.userEmail)"
       >
-        Refresh
+        {{ t('files.refresh') }}
       </button>
     </div>
 
     <!-- Loading -->
-    <div v-if="store.loading" class="files-loading">Loading files...</div>
+    <div v-if="store.loading" class="files-loading">{{ t('files.loading') }}</div>
 
     <!-- Error -->
     <div v-else-if="store.error" class="files-error">{{ store.error }}</div>
@@ -87,7 +89,7 @@ const recentTasks = computed(() => {
       <!-- Summary bar -->
       <div class="summary-bar">
         <span class="summary-total">
-          {{ store.totalFiles }} files total, {{ store.downloadedFiles }} downloaded (server)
+          {{ t('files.summary', { total: store.totalFiles, downloaded: store.downloadedFiles }) }}
         </span>
         <div class="summary-actions">
           <button
@@ -96,21 +98,21 @@ const recentTasks = computed(() => {
             :disabled="store.hasActiveDownloads"
             @click="store.downloadAll()"
           >
-            Download All
+            {{ t('files.downloadAll') }}
           </button>
           <button
             v-if="store.hasActiveDownloads"
             class="btn-abort-all"
             @click="store.abortAll()"
           >
-            Abort All
+            {{ t('files.abortAll') }}
           </button>
         </div>
       </div>
 
       <!-- Quest device selector -->
       <div class="quest-bar">
-        <span class="quest-label">Quest:</span>
+        <span class="quest-label">{{ t('files.quest') }}</span>
         <select
           v-if="store.questDeviceNames.length > 0"
           v-model="store.selectedQuestDevice"
@@ -120,16 +122,16 @@ const recentTasks = computed(() => {
             {{ name }}
           </option>
         </select>
-        <span v-else class="quest-none">No devices</span>
+        <span v-else class="quest-none">{{ t('files.noDevices') }}</span>
         <span v-if="store.selectedQuestDevice" class="quest-count">
-          {{ store.selectedQuestFileIds.size }} files on device
+          {{ t('files.filesOnDevice', { count: store.selectedQuestFileIds.size }) }}
         </span>
         <button
           class="btn-refresh-quest"
           :disabled="store.questLoading"
           @click="store.loadQuestFiles()"
         >
-          {{ store.questLoading ? '...' : 'Scan' }}
+          {{ store.questLoading ? '...' : t('files.scan') }}
         </button>
       </div>
 
@@ -204,7 +206,7 @@ const recentTasks = computed(() => {
 
       <!-- Active downloads panel -->
       <div v-if="activeDownloads.length > 0" class="downloads-panel">
-        <h2>Downloading</h2>
+        <h2>{{ t('files.downloading') }}</h2>
         <div v-for="task in activeDownloads" :key="task.task_id" class="download-item">
           <div class="download-info">
             <span class="download-name">{{ task.file_name }}</span>
@@ -215,14 +217,14 @@ const recentTasks = computed(() => {
           </div>
           <div class="download-meta">
             <span class="download-bytes">{{ formatSize(task.downloaded_bytes) }} / {{ formatSize(task.file_size) }}</span>
-            <button class="btn-abort" @click="store.abortTask(task.task_id)">Abort</button>
+            <button class="btn-abort" @click="store.abortTask(task.task_id)">{{ t('files.abort') }}</button>
           </div>
         </div>
       </div>
 
       <!-- Recent tasks -->
       <div v-if="recentTasks.length > 0" class="recent-panel">
-        <h2>Recent</h2>
+        <h2>{{ t('files.recent') }}</h2>
         <div v-for="task in recentTasks" :key="task.task_id" class="recent-item">
           <span class="recent-name">{{ task.file_name }}</span>
           <span class="recent-status" :class="taskStatusClass(task)">{{ task.status }}</span>
@@ -234,10 +236,10 @@ const recentTasks = computed(() => {
     <!-- Empty state -->
     <div v-else class="files-empty">
       <template v-if="auth.isAuthenticated">
-        No files found for this account.
+        {{ t('files.noFiles') }}
       </template>
       <template v-else>
-        Please log in to view files.
+        {{ t('files.loginRequired') }}
       </template>
     </div>
   </div>

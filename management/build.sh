@@ -1,5 +1,5 @@
 #!/bin/bash
-# Build Poranos Management Electron App
+# Build Poranos Desktop Electron App
 # Usage: bash build.sh [frontend|backend|sync-server|electron|all]
 #
 # Prerequisites:
@@ -11,6 +11,10 @@
 #   dist-pyinstaller/backend/      - Management backend (FastAPI)
 #   dist-pyinstaller/sync-server/  - Sync server (WebSocket)
 #   dist-electron/                 - Electron installer/portable exe
+#
+# Platform:
+#   Windows: builds NSIS installer + portable exe
+#   macOS:   builds DMG (arm64)
 
 set -e
 
@@ -20,8 +24,10 @@ cd "$SCRIPT_DIR"
 # Cross-platform npm command
 if [[ "$(uname)" == "Darwin" ]]; then
     NPM_CMD="npm"
+    PLATFORM="mac"
 else
     NPM_CMD="/c/nvm4w/nodejs/npm.cmd"
+    PLATFORM="win"
 fi
 SERVER_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
@@ -70,7 +76,7 @@ step_sync_server() {
 }
 
 step_electron() {
-    echo "=== Build Electron app ==="
+    echo "=== Build Electron app ($PLATFORM) ==="
     cd "$SCRIPT_DIR/electron"
     "$NPM_CMD" install
     "$NPM_CMD" run dist
@@ -99,7 +105,11 @@ case "${1:-all}" in
         echo ""
         echo "=== Build complete ==="
         echo "Output: dist-electron/"
-        ls -la dist-electron/*.exe 2>/dev/null || echo "(Check dist-electron/ for output files)"
+        if [[ "$PLATFORM" == "win" ]]; then
+            ls -la dist-electron/*.exe 2>/dev/null || echo "(Check dist-electron/ for output files)"
+        else
+            ls -la dist-electron/*.dmg 2>/dev/null || echo "(Check dist-electron/ for output files)"
+        fi
         ;;
     *)
         echo "Usage: bash build.sh [frontend|backend|sync-server|electron|all]"

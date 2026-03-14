@@ -66,7 +66,7 @@ async def lifespan(app: FastAPI):
     await metrics_service.stop()
 
 
-app = FastAPI(title="Poranos Management", lifespan=lifespan)
+app = FastAPI(title="Poranos Desktop", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,

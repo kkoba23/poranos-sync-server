@@ -12,7 +12,7 @@ class Settings(BaseSettings):
     adb_host: str = "localhost" if _standalone else "host.docker.internal"
     adb_port: int = 5037
     upload_dir: str = os.path.join(os.path.dirname(__file__), "uploads") if _standalone else "/app/uploads"
-    docker_container_name: str = "poranos-sync-server"
+    docker_container_name: str = "poranos-desktop-sync"
     metrics_poll_interval: int = 5
     device_poll_interval: int = 10
     # WiFi ADB: comma-separated "ip:port" or "ip" (default port 5555)

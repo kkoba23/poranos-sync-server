@@ -1,7 +1,7 @@
 {
-  "name": "poranos-management",
-  "version": "1.0.0",
-  "description": "Poranos Management Desktop App",
+  "name": "poranos-desktop",
+  "version": "1.0.5",
+  "description": "Poranos Desktop App",
   "main": "main.js",
   "author": "Poranos",
   "license": "UNLICENSED",
@@ -15,15 +15,16 @@
     "electron-builder": "^26.0.0"
   },
   "build": {
-    "appId": "com.poranos.management",
-    "productName": "Poranos Management",
+    "appId": "com.poranos.desktop",
+    "productName": "Poranos Desktop",
     "directories": {
       "output": "../dist-electron"
     },
     "files": [
       "main.js",
       "preload.js",
-      "poranos.ico"
+      "poranos.ico",
+      "poranos.png"
     ],
     "extraResources": [
       {
@@ -42,10 +43,6 @@
         {
           "target": "nsis",
           "arch": ["x64"]
-        },
-        {
-          "target": "portable",
-          "arch": ["x64"]
         }
       ],
       "icon": "poranos.ico",
@@ -57,9 +54,6 @@
       "installerIcon": "poranos.ico",
       "include": "installer.nsh"
     },
-    "portable": {
-      "artifactName": "PoranosManagement-${version}-portable.exe"
-    },
     "mac": {
       "target": [
         {
@@ -67,11 +61,11 @@
           "arch": ["arm64"]
         }
       ],
-      "icon": "poranos.ico",
+      "icon": "poranos.png",
       "category": "public.app-category.developer-tools"
     },
     "dmg": {
-      "artifactName": "PoranosManagement-${version}-arm64.dmg"
+      "artifactName": "PoranosDesktop-${version}-arm64.dmg"
     }
   }
 }

@@ -1,13 +1,14 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { useI18n } from '@/i18n'
 import { useRoomStore } from '@/stores/roomStore'
 import { useFileStore, type FileItem, isVideoFile } from '@/stores/fileStore'
 import { post } from '@/api/client'
-import { poranosPost } from '@/api/poranos'
 
 const route = useRoute()
 const router = useRouter()
+const { t } = useI18n()
 const roomStore = useRoomStore()
 const fileStore = useFileStore()
 
@@ -64,17 +65,6 @@ async function playFile(file: FileItem) {
     console.warn('sync-server command failed:', e)
   }
 
-  // poranos.com（sync-server経由で直接指示が届くため無効化）
-  // try {
-  //   await poranosPost('/trigger-play-if-linked/', {
-  //     room_number: room.value?.number,
-  //     file_id: file.id,
-  //     type: 'play',
-  //   })
-  // } catch {
-  //   // ignore
-  // }
-
   // 動画ファイルならMoviePlayerに遷移
   if (isVideoFile(file)) {
     router.push(`/operation/${roomId}/movie`)
@@ -92,27 +82,9 @@ async function videoControl(type: string, seekPosition = 0) {
   } catch (e) {
     console.warn('sync-server command failed:', e)
   }
-
-  // poranos.com（sync-server経由で直接指示が届くため無効化）
-  // try {
-  //   await poranosPost('/trigger-play-if-linked/', {
-  //     room_number: room.value?.number,
-  //     type,
-  //     seek_position: seekPosition,
-  //   })
-  // } catch {
-  //   // ignore
-  // }
 }
 
 function goBack() {
-  // ルーム離脱指令
-  // poranos.com（sync-server経由で直接指示が届くため無効化）
-  // poranosPost('/trigger-play-if-linked/', {
-  //   room_number: room.value?.number,
-  //   type: 'remove',
-  // }).catch(() => {})
-
   post('/api/remote/command', {
     room_name: 'default',
     command: 'remove_all',
@@ -143,7 +115,7 @@ onMounted(() => {
   <div class="file-player-page">
     <div class="file-player-header">
       <button class="btn btn-primary back-btn" @click="goBack">
-        &larr; 戻る
+        &larr; {{ t('filePlayer.back') }}
       </button>
       <h2 class="room-title">{{ room?.name || 'Room' }}</h2>
     </div>
@@ -155,9 +127,9 @@ onMounted(() => {
       <button class="btn btn-sm btn-danger" @click="videoControl('stop')">&#9632; Stop</button>
     </div>
 
-    <div v-if="fileStore.loading" class="loading-text">ファイル読み込み中...</div>
+    <div v-if="fileStore.loading" class="loading-text">{{ t('filePlayer.loading') }}</div>
 
-    <div v-else-if="visibleFiles.length === 0" class="empty-text">ファイルがありません</div>
+    <div v-else-if="visibleFiles.length === 0" class="empty-text">{{ t('filePlayer.noFiles') }}</div>
 
     <div v-else class="file-navigation">
       <!-- Prev -->
@@ -182,7 +154,8 @@ onMounted(() => {
               :alt="file.name"
               class="file-img"
             />
-            <div v-else class="file-img-placeholder">No Image</div>
+            <div v-else class="file-img-placeholder">{{ t('filePlayer.noImage') }}</div>
+            <span v-if="file.thumbnail_cached === false" class="not-cached-badge">{{ t('operation.notCached') }}</span>
           </div>
           <div class="file-name" :title="file.name">{{ file.name }}</div>
         </div>
@@ -273,6 +246,7 @@ onMounted(() => {
   border-color: var(--danger);
 }
 .file-thumbnail {
+  position: relative;
   width: 140px;
   height: 140px;
   border: 1px dashed var(--border);
@@ -282,6 +256,17 @@ onMounted(() => {
   justify-content: center;
   overflow: hidden;
   margin-bottom: 0.5rem;
+}
+.not-cached-badge {
+  position: absolute;
+  bottom: 4px;
+  right: 4px;
+  background: rgba(245, 158, 11, 0.85);
+  color: #000;
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-size: 0.6rem;
+  font-weight: 600;
 }
 .file-img {
   width: 100%;

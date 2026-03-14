@@ -176,8 +176,9 @@ async def handle_join_room(ws, msg: dict):
     hw_serial = msg.get("hwSerial", "")
     connected_via = msg.get("connectedVia", "")
     account = msg.get("account", "")
+    app_mode = msg.get("app_mode", "")
     if device_id or device_name or connected_via:
-        ws_device_info[ws] = {"deviceId": device_id, "deviceName": device_name, "deviceModel": device_model, "androidId": android_id, "hwSerial": hw_serial, "connectedVia": connected_via, "account": account}
+        ws_device_info[ws] = {"deviceId": device_id, "deviceName": device_name, "deviceModel": device_model, "androidId": android_id, "hwSerial": hw_serial, "connectedVia": connected_via, "account": account, "app_mode": app_mode}
 
     log.info(f"  [{room_name}] Client joined: clientId={client_id} device={device_name}({device_model}) hwSerial={hw_serial} via={connected_via} (total={len(room.clients)})")
 
@@ -218,10 +219,10 @@ async def handle_update_device_info(ws, msg: dict):
     info = ws_device_info.get(ws)
     if info is None:
         return
-    for key in ("account",):
+    for key in ("account", "app_mode"):
         if key in msg:
             info[key] = msg[key]
-    log.info(f"  update_device_info: account={info.get('account', '')}")
+    log.info(f"  update_device_info: account={info.get('account', '')} app_mode={info.get('app_mode', '')}")
 
 
 async def handle_leave_room(ws):

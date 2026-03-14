@@ -4,6 +4,7 @@ import os
 
 import aiofiles
 from fastapi import APIRouter, UploadFile, File, WebSocket, WebSocketDisconnect
+from pydantic import BaseModel
 
 from services.adb_service import AdbService, set_task_update_callback, set_provision_event_callback
 from config import settings
@@ -96,6 +97,43 @@ async def install_all(apk: UploadFile = File(...)):
         content = await apk.read()
         await f.write(content)
 
+    return await _install_all_from_path(apk_path, apk.filename)
+
+
+class LocalApkRequest(BaseModel):
+    path: str
+
+
+@router.post("/install-all-local")
+async def install_all_local(req: LocalApkRequest):
+    """ローカルファイルパスから直接インストール（アップロード不要）"""
+    apk_path = os.path.abspath(req.path)
+    if not os.path.isfile(apk_path):
+        return {"error": f"File not found: {apk_path}"}
+    if not apk_path.lower().endswith(".apk"):
+        return {"error": "File must be an .apk file"}
+    return await _install_all_from_path(apk_path, os.path.basename(apk_path))
+
+
+@router.post("/{serial}/install-local")
+async def install_local(serial: str, req: LocalApkRequest):
+    """ローカルファイルパスから単一デバイスにインストール"""
+    apk_path = os.path.abspath(req.path)
+    if not os.path.isfile(apk_path):
+        return {"error": f"File not found: {apk_path}"}
+    if not apk_path.lower().endswith(".apk"):
+        return {"error": "File must be an .apk file"}
+
+    await _adb_service.cancel_install_for_device(serial)
+    task = AdbService.create_task(serial, os.path.basename(apk_path))
+    asyncio.create_task(
+        _adb_service.install_apk(serial, apk_path, task["task_id"])
+    )
+    return task
+
+
+async def _install_all_from_path(apk_path: str, filename: str) -> dict:
+    """共通: パスからの全デバイスインストール"""
     devices = await _adb_service.get_devices()
     tasks = []
     install_queue: list[tuple[str, str]] = []  # (adb_serial, task_id)
@@ -107,7 +145,7 @@ async def install_all(apk: UploadFile = File(...)):
         # Cancel any existing install for this device
         await _adb_service.cancel_install_for_device(adb_serial)
 
-        task = AdbService.create_task(display_serial, apk.filename)
+        task = AdbService.create_task(display_serial, filename)
         install_queue.append((adb_serial, task["task_id"]))
         tasks.append(task)
 
@@ -192,6 +230,25 @@ async def reboot_all():
             continue
         adb_serial = device.get("adb_serial") or device["serial"]
         result = await _adb_service.reboot(adb_serial)
+        results.append({"serial": device["serial"], **result})
+    return {"results": results}
+
+
+@router.post("/{serial}/shutdown")
+async def shutdown_device(serial: str):
+    result = await _adb_service.shutdown(serial)
+    return result
+
+
+@router.post("/shutdown-all")
+async def shutdown_all():
+    devices = await _adb_service.get_devices()
+    results = []
+    for device in devices:
+        if device["status"] != "device":
+            continue
+        adb_serial = device.get("adb_serial") or device["serial"]
+        result = await _adb_service.shutdown(adb_serial)
         results.append({"serial": device["serial"], **result})
     return {"results": results}
 

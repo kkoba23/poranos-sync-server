@@ -1,6 +1,9 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import { useI18n } from '@/i18n'
 import type { MetricsSnapshot } from '@/types'
+
+const { t } = useI18n()
 
 const props = defineProps<{
   metrics: MetricsSnapshot | null
@@ -18,13 +21,13 @@ const rooms = computed(() => {
 
 <template>
   <div class="card">
-    <div class="card-title">Active Rooms</div>
+    <div class="card-title">{{ t('rooms.activeRooms') }}</div>
     <table class="table" v-if="rooms.length > 0">
       <thead>
         <tr>
-          <th>Room</th>
-          <th>Clients</th>
-          <th>Objects</th>
+          <th>{{ t('rooms.room') }}</th>
+          <th>{{ t('rooms.clients') }}</th>
+          <th>{{ t('rooms.objects') }}</th>
         </tr>
       </thead>
       <tbody>
@@ -36,7 +39,7 @@ const rooms = computed(() => {
       </tbody>
     </table>
     <div v-else style="color: var(--text-secondary); font-size: 0.9rem;">
-      No active rooms
+      {{ t('rooms.noRooms') }}
     </div>
   </div>
 </template>

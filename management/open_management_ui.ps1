@@ -1,5 +1,5 @@
-# Poranos Management UI auto-open script
-# Starts Docker Desktop if needed, waits for management container, then opens browser
+# Poranos Desktop auto-open script
+# Starts Docker Desktop if needed, waits for backend container, then opens browser
 
 $maxWait = 300  # seconds (Docker startup can be slow)
 $interval = 5
@@ -18,13 +18,13 @@ if (-not $docker) {
     Start-Process "C:\Program Files\Docker\Docker\Docker Desktop.exe"
 }
 
-Write-Host "Waiting for Poranos Management to be ready..."
+Write-Host "Waiting for Poranos Desktop to be ready..."
 
 while ($elapsed -lt $maxWait) {
     try {
         $response = Invoke-WebRequest -Uri $url -UseBasicParsing -TimeoutSec 3 -ErrorAction Stop
         if ($response.StatusCode -eq 200) {
-            Write-Host "Management UI is ready. Opening browser..."
+            Write-Host "Poranos Desktop is ready. Opening browser..."
             Start-Process $url
             exit 0
         }
@@ -36,4 +36,4 @@ while ($elapsed -lt $maxWait) {
     Write-Host "  Waiting... ($elapsed/$maxWait sec)"
 }
 
-Write-Host "Timed out waiting for Management UI."
+Write-Host "Timed out waiting for Poranos Desktop."

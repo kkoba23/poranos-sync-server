@@ -2,7 +2,9 @@
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/authStore'
+import { useI18n } from '@/i18n'
 
+const { t } = useI18n()
 const authStore = useAuthStore()
 const router = useRouter()
 
@@ -26,23 +28,23 @@ async function handleLogin() {
 <template>
   <div class="login-container">
     <div class="login-card card">
-      <h2 class="login-title">Poranos Login</h2>
-      <p class="login-subtitle">poranos.com アカウントでログイン</p>
+      <h2 class="login-title">{{ t('login.title') }}</h2>
+      <p class="login-subtitle">{{ t('login.subtitle') }}</p>
 
       <form @submit.prevent="handleLogin" class="login-form">
         <div class="form-group">
-          <label>Email</label>
+          <label>{{ t('login.email') }}</label>
           <input v-model="email" type="email" placeholder="email@example.com" required />
         </div>
         <div class="form-group">
-          <label>Password</label>
+          <label>{{ t('login.password') }}</label>
           <input v-model="password" type="password" placeholder="password" required />
         </div>
 
         <div v-if="authStore.error" class="error-message">{{ authStore.error }}</div>
 
         <button type="submit" class="btn btn-primary login-btn" :disabled="loading">
-          {{ loading ? 'ログイン中...' : 'ログイン' }}
+          {{ loading ? t('login.loading') : t('login.submit') }}
         </button>
       </form>
     </div>

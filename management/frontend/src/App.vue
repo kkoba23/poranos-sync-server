@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { useAuthStore } from '@/stores/authStore'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { useI18n } from '@/i18n'
-import { post, get } from '@/api/client'
+import { post, get, wsUrl } from '@/api/client'
+import { useToast } from '@/composables/useToast'
 import DeviceSidebar from '@/components/mirroring/DeviceSidebar.vue'
 import AppToast from '@/components/AppToast.vue'
 
@@ -12,6 +13,38 @@ const authStore = useAuthStore()
 const settings = useSettingsStore()
 const { t } = useI18n()
 const route = useRoute()
+const globalToast = useToast()
+
+// Global provision event listener (active on all tabs)
+let provisionWs: WebSocket | null = null
+let provisionReconnectTimer: ReturnType<typeof setTimeout> | null = null
+
+function connectProvisionWs() {
+  provisionWs = new WebSocket(wsUrl('/api/devices/ws'))
+  provisionWs.onmessage = (event) => {
+    try {
+      const msg = JSON.parse(event.data)
+      if (msg.type === 'provision_event') {
+        const level = msg.level || 'info'
+        const text = `[${msg.serial}] ${msg.message}`
+        if (level === 'success') globalToast.success(text, 8000)
+        else if (level === 'error') globalToast.error(text)
+        else if (level === 'warning') globalToast.warning(text)
+        else globalToast.info(text)
+      }
+    } catch { /* ignore */ }
+  }
+  provisionWs.onclose = () => {
+    provisionReconnectTimer = setTimeout(connectProvisionWs, 5000)
+  }
+  provisionWs.onerror = () => { provisionWs?.close() }
+}
+
+onMounted(connectProvisionWs)
+onUnmounted(() => {
+  if (provisionReconnectTimer) clearTimeout(provisionReconnectTimer)
+  provisionWs?.close()
+})
 
 const isPortable = computed(() => settings.uiMode === 'portable')
 const showDeviceSidebar = computed(() => !isPortable.value && route.path.startsWith('/operation'))
@@ -125,15 +158,12 @@ function reloadPage() {
         </ul>
 
         <div class="sidebar-controls">
-          <div class="control-row">
-            <span class="control-label">{{ t('sidebar.autoLaunch') }}</span>
-            <button
-              class="toggle-btn"
-              :class="{ active: autoLaunch }"
-              :disabled="autoLaunchLoading"
-              @click="toggleAutoLaunch"
-            >{{ autoLaunch ? 'ON' : 'OFF' }}</button>
-          </div>
+          <button
+            class="btn-fullscreen"
+            :class="autoLaunch ? 'btn-success-outline' : 'btn-off-outline'"
+            :disabled="autoLaunchLoading"
+            @click="toggleAutoLaunch"
+          >{{ t('sidebar.autoLaunch') }}: {{ autoLaunch ? 'ON' : 'OFF' }}</button>
           <button
             class="btn-fullscreen btn-danger-outline"
             :disabled="allStopping"

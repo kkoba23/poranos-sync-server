@@ -80,6 +80,7 @@ export interface Device {
   storage_used_gb?: number
   storage_total_gb?: number
   app_account?: string
+  app_mode?: string
   webrtc_available: boolean
 }
 

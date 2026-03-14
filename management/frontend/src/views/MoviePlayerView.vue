@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onBeforeUnmount, nextTick, watch } from 'vue'
 import { useRoute, useRouter, onBeforeRouteLeave } from 'vue-router'
+import { useI18n } from '@/i18n'
 import { useRoomStore } from '@/stores/roomStore'
 import { useFileStore, isVideoFile } from '@/stores/fileStore'
 import { post } from '@/api/client'
@@ -8,6 +9,7 @@ import { poranosPost } from '@/api/poranos'
 
 const route = useRoute()
 const router = useRouter()
+const { t } = useI18n()
 const roomStore = useRoomStore()
 const fileStore = useFileStore()
 
@@ -201,11 +203,11 @@ const sliderProgress = computed(() => {
   <div class="movie-player-page">
     <!-- ヘッダー -->
     <div class="player-header">
-      <button class="btn btn-primary back-btn" @click="goBack">&larr; 戻る</button>
+      <button class="btn btn-primary back-btn" @click="goBack">&larr; {{ t('moviePlayer.back') }}</button>
       <h2 class="video-title">{{ videoFileName || 'Video' }}</h2>
       <label v-if="isStereoVideo" class="stereo-toggle">
         <input type="checkbox" v-model="showFullStereo" />
-        <span>{{ showFullStereo ? '全体表示' : '左目のみ' }}</span>
+        <span>{{ showFullStereo ? t('moviePlayer.fullView') : t('moviePlayer.leftEye') }}</span>
       </label>
     </div>
 
@@ -227,7 +229,7 @@ const sliderProgress = computed(() => {
           :class="{ 'stereo-video': isStereoVideo && !showFullStereo }"
         />
       </div>
-      <div v-else class="loading-message">動画を読み込んでいます...</div>
+      <div v-else class="loading-message">{{ t('moviePlayer.loading') }}</div>
     </div>
 
     <!-- コントロール -->

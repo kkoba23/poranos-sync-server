@@ -3,7 +3,7 @@ services:
     build:
       context: .
       dockerfile: sync-server/Dockerfile
-    container_name: poranos-sync-server
+    container_name: poranos-desktop-sync
     ports:
       - "${SYNC_PORT:-8765}:8765"
     environment:
@@ -20,7 +20,7 @@ services:
     build:
       context: .
       dockerfile: management/Dockerfile
-    container_name: poranos-management
+    container_name: poranos-desktop-backend
     ports:
       - "${MGMT_PORT:-8080}:8080"
     environment:
@@ -28,7 +28,7 @@ services:
       - ADB_HOST=host.docker.internal
       - ADB_PORT=5037
       - UPLOAD_DIR=/app/uploads
-      - DOCKER_CONTAINER_NAME=poranos-sync-server
+      - DOCKER_CONTAINER_NAME=poranos-desktop-sync
       - WIFI_DEVICES=${WIFI_DEVICES:-}
     volumes:
       - //var/run/docker.sock:/var/run/docker.sock

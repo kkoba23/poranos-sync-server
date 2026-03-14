@@ -15,7 +15,9 @@ defineEmits<{
   stop: [serial: string]
   cancelInstall: [serial: string]
   reboot: [serial: string]
+  shutdown: [serial: string]
   accountChange: [serial: string, room: string, clientId: number]
+  modeChange: [serial: string, room: string, clientId: number, mode: string]
 }>()
 
 function getDeviceTask(device: Device): InstallTask | undefined {
@@ -51,7 +53,9 @@ function getDeviceTask(device: Device): InstallTask | undefined {
         @stop="$emit('stop', device.adb_serial || device.serial)"
         @cancel-install="$emit('cancelInstall', device.adb_serial || device.serial)"
         @reboot="$emit('reboot', device.adb_serial || device.serial)"
+        @shutdown="$emit('shutdown', device.adb_serial || device.serial)"
         @account-change="$emit('accountChange', device.adb_serial || device.serial, device.sync_room || '', device.sync_client_id || 0)"
+        @mode-change="(mode: string) => $emit('modeChange', device.adb_serial || device.serial, device.sync_room || '', device.sync_client_id || 0, mode)"
       />
     </div>
   </div>

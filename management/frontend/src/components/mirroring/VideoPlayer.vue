@@ -1,6 +1,9 @@
 <script setup lang="ts">
 import { ref, watch, computed, onMounted, onUnmounted } from 'vue'
+import { useI18n } from '@/i18n'
 import type { Device } from '@/types'
+
+const { t } = useI18n()
 
 const props = defineProps<{
   stream: MediaStream | null
@@ -114,7 +117,7 @@ function stateColor(state: string): string {
       <div class="device-status-row">
         <template v-if="deviceInfo">
           <span class="sync-badge" :class="deviceInfo.sync_connected ? 'sync-on' : 'sync-off'">
-            Sync: {{ deviceInfo.sync_connected ? 'Connected' : 'Disconnected' }}
+            {{ t('device.sync') }}: {{ deviceInfo.sync_connected ? t('device.connected') : t('device.disconnected') }}
           </span>
           <span v-if="deviceInfo.sync_room" class="room-badge">{{ deviceInfo.sync_room }}</span>
         </template>
@@ -124,13 +127,13 @@ function stateColor(state: string): string {
     <div class="video-container">
       <div v-if="!stream" class="placeholder">
         <div v-if="state === 'connecting'" style="color: var(--warning)">
-          Connecting...
+          {{ t('video.connecting') }}
         </div>
         <div v-else-if="state === 'failed'" style="color: var(--danger)">
-          Failed
+          {{ t('video.failed') }}
         </div>
         <div v-else style="color: var(--text-secondary)">
-          Waiting for stream...
+          {{ t('video.waiting') }}
         </div>
       </div>
       <video

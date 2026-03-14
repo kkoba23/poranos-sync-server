@@ -3,11 +3,11 @@ import { computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { storeToRefs } from 'pinia'
 import { useRoomStore, type Room } from '@/stores/roomStore'
-import { useAuthStore } from '@/stores/authStore'
 import { post } from '@/api/client'
+import { useI18n } from '@/i18n'
 
+const { t } = useI18n()
 const roomStore = useRoomStore()
-const authStore = useAuthStore()
 const router = useRouter()
 
 const { operationPage: currentPage } = storeToRefs(roomStore)
@@ -56,57 +56,54 @@ onMounted(() => {
 
 <template>
   <div class="operation-page">
-      <h1 class="page-title">Operation</h1>
-      <p class="page-subtitle">
-        {{ authStore.userEmail }}
-        <span v-if="roomStore.dataSource === 'cache'" class="offline-badge">offline (cache)</span>
-      </p>
+    <h1 class="page-title">{{ t('operation.title') }}</h1>
 
-      <div v-if="roomStore.loading" class="loading-text">ルーム読み込み中...</div>
+    <div v-if="roomStore.loading" class="loading-text">{{ t('operation.loading') }}</div>
 
-      <div v-else-if="rooms.length === 0" class="empty-text">ルームがありません</div>
+    <div v-else-if="rooms.length === 0" class="empty-text">{{ t('operation.noRooms') }}</div>
 
-      <div v-else class="room-navigation">
-        <!-- Prev -->
-        <button
-          class="nav-btn"
-          :class="{ hidden: currentPage === 0 }"
-          @click="prevPage"
+    <div v-else class="room-navigation">
+      <!-- Prev -->
+      <button
+        class="nav-btn"
+        :class="{ hidden: currentPage === 0 }"
+        @click="prevPage"
+      >
+        &lsaquo;
+      </button>
+
+      <!-- Room Grid -->
+      <div class="room-grid">
+        <div
+          v-for="room in paginatedRooms"
+          :key="room.id"
+          class="room-card"
+          @click="openRoom(room)"
         >
-          &lsaquo;
-        </button>
-
-        <!-- Room Grid -->
-        <div class="room-grid">
-          <div
-            v-for="room in paginatedRooms"
-            :key="room.id"
-            class="room-card"
-            @click="openRoom(room)"
-          >
-            <div class="room-thumbnail">
-              <img
-                v-if="room.thumbnail_large_url"
-                :src="room.thumbnail_large_url"
-                :alt="room.name"
-                class="room-img"
-              />
-              <div v-else class="room-img-placeholder">No Image</div>
-              <span class="room-number-badge">{{ room.number }}</span>
-            </div>
-            <div class="room-name">{{ room.name }}</div>
+          <div class="room-thumbnail">
+            <img
+              v-if="room.thumbnail_large_url"
+              :src="room.thumbnail_large_url"
+              :alt="room.name"
+              class="room-img"
+            />
+            <div v-else class="room-img-placeholder">{{ t('operation.noImage') }}</div>
+            <span class="room-number-badge">{{ room.number }}</span>
+            <span v-if="!room.files_cached" class="not-cached-badge">{{ t('operation.notCached') }}</span>
           </div>
+          <div class="room-name">{{ room.name }}</div>
         </div>
-
-        <!-- Next -->
-        <button
-          class="nav-btn"
-          :class="{ hidden: currentPage >= totalPages - 1 }"
-          @click="nextPage"
-        >
-          &rsaquo;
-        </button>
       </div>
+
+      <!-- Next -->
+      <button
+        class="nav-btn"
+        :class="{ hidden: currentPage >= totalPages - 1 }"
+        @click="nextPage"
+      >
+        &rsaquo;
+      </button>
+    </div>
   </div>
 </template>
 
@@ -114,21 +111,8 @@ onMounted(() => {
 .operation-page {
   max-width: 1100px;
 }
-.page-subtitle {
-  color: var(--text-secondary);
-  font-size: 0.85rem;
-  margin-bottom: 1.5rem;
-}
-.offline-badge {
-  display: inline-block;
-  background: #f59e0b;
-  color: #000;
-  font-size: 0.7rem;
-  font-weight: 600;
-  padding: 2px 8px;
-  border-radius: 4px;
-  margin-left: 0.5rem;
-  vertical-align: middle;
+.page-title {
+  margin-bottom: 1rem;
 }
 .loading-text, .empty-text {
   color: var(--text-secondary);
@@ -207,6 +191,17 @@ onMounted(() => {
   padding: 4px 10px;
   border-radius: 4px;
   font-size: 0.8rem;
+}
+.not-cached-badge {
+  position: absolute;
+  bottom: 8px;
+  right: 8px;
+  background: rgba(245, 158, 11, 0.85);
+  color: #000;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 0.65rem;
+  font-weight: 600;
 }
 .room-name {
   padding: 0.75rem 1rem;

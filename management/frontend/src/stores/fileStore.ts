@@ -20,6 +20,7 @@ export interface FileItem {
   }
   isTriggered?: boolean
   presigned_url?: string | null
+  thumbnail_cached?: boolean
 }
 
 const VIDEO_EXTENSIONS = ['mp4', 'webm', 'ogg', 'mov']

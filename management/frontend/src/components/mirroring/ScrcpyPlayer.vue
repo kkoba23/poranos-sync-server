@@ -4,7 +4,10 @@ import { useScrcpyStream } from '@/composables/useScrcpyStream'
 import { useAuthStore } from '@/stores/authStore'
 import { post } from '@/api/client'
 import ConfirmModal from '@/components/ConfirmModal.vue'
+import { useI18n } from '@/i18n'
 import type { Device } from '@/types'
+
+const { t } = useI18n()
 
 const props = withDefaults(defineProps<{
   device: Device
@@ -34,7 +37,7 @@ const syncViaType = computed(() => {
 
 const syncViaLabel = computed(() => {
   const via = props.device.sync_connected_via || ''
-  return via.includes('localhost') ? 'adb reverse' : 'WiFi direct'
+  return via.includes('localhost') ? t('device.adbReverse') : t('device.wifiDirect')
 })
 
 const storageColor = computed(() => {
@@ -52,18 +55,48 @@ const isAccountSame = computed(() => {
   return props.device.app_account === authStore.userEmail
 })
 
+const isMultiplayMode = computed(() => {
+  const m = props.device.app_mode || ''
+  return m === 'Multiplay' || m === 'MultiplayOnPre'
+})
+
+const modeLabel = computed(() => {
+  const m = props.device.app_mode || ''
+  if (m === 'Standalone') return t('device.modeStandalone')
+  if (m === 'Multiplay' || m === 'MultiplayOnPre') return t('device.modeMultiplay')
+  return m || '-'
+})
+
 const accountError = ref('')
+
+async function switchMode(mode: string) {
+  const room = props.device.sync_room || ''
+  const clientId = props.device.sync_client_id || 0
+  if (!room || !clientId) {
+    accountError.value = t('devices.syncRequired')
+    return
+  }
+  try {
+    await post('/api/remote/command', {
+      room_name: room,
+      command: 'switch_appmode',
+      params: { mode, target_client_id: clientId },
+    })
+  } catch (e: any) {
+    accountError.value = `Mode switch failed: ${e.message}`
+  }
+}
 
 async function accountChange() {
   const email = authStore.userEmail
   if (!email) {
-    accountError.value = 'Management UIにログインしてください'
+    accountError.value = t('devices.loginRequired')
     return
   }
   const room = props.device.sync_room || ''
   const clientId = props.device.sync_client_id || 0
   if (!room || !clientId) {
-    accountError.value = 'デバイスがSync Serverに接続されていません'
+    accountError.value = t('devices.syncRequired')
     return
   }
   try {
@@ -73,7 +106,7 @@ async function accountChange() {
       params: { email, target_client_id: clientId },
     })
   } catch (e: any) {
-    accountError.value = `アカウント設定に失敗しました: ${e.message}`
+    accountError.value = `${t('devices.accountFailed')}: ${e.message}`
   }
 }
 
@@ -123,6 +156,7 @@ async function stopApp() {
 }
 
 const showRebootConfirm = ref(false)
+const showShutdownConfirm = ref(false)
 
 async function rebootDevice() {
   const serial = props.device.adb_serial || props.device.serial
@@ -131,8 +165,31 @@ async function rebootDevice() {
   } catch { /* ignore */ }
 }
 
+async function shutdownDevice() {
+  const serial = props.device.adb_serial || props.device.serial
+  try {
+    await fetch(`/api/devices/${encodeURIComponent(serial)}/shutdown`, { method: 'POST' })
+  } catch { /* ignore */ }
+}
+
 // adb_serial があればそちらを使う（Wi-Fi含む）
 const streamSerial = () => props.device.adb_serial || props.device.serial
+
+const refreshing = ref(false)
+
+async function refreshStream() {
+  refreshing.value = true
+  const serial = streamSerial()
+  try {
+    disconnect()
+    await fetch(`/api/mirror/stop/${encodeURIComponent(serial)}`, { method: 'POST' })
+    await new Promise(r => setTimeout(r, 500))
+    if (canvasRef.value) {
+      connect(serial, canvasRef.value)
+    }
+  } catch { /* ignore */ }
+  refreshing.value = false
+}
 
 function toggleFullscreen() {
   isFullscreen.value = !isFullscreen.value
@@ -198,13 +255,13 @@ watch(() => props.device.status, (newStatus, oldStatus) => {
         class="btn btn-success btn-xs"
         :disabled="!device.app_installed || device.status !== 'device'"
         @click="launchApp"
-      >Launch</button>
+      >{{ t('device.launch') }}</button>
       <button
         v-else
         class="btn btn-danger btn-xs"
         :disabled="device.status !== 'device'"
         @click="stopApp"
-      >Stop</button>
+      >{{ t('device.stop') }}</button>
 
       <!-- Volume -->
       <div class="header-volume" v-if="device.volume_music != null">
@@ -219,6 +276,15 @@ watch(() => props.device.status, (newStatus, oldStatus) => {
         />
         <span class="volume-value">{{ localVolume }}</span>
       </div>
+
+      <!-- Refresh stream -->
+      <button class="fullscreen-btn" @click="refreshStream" :disabled="refreshing || device.status !== 'device'" title="Refresh stream">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" :class="{ spinning: refreshing }">
+          <polyline points="23 4 23 10 17 10"></polyline>
+          <polyline points="1 20 1 14 7 14"></polyline>
+          <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
+        </svg>
+      </button>
 
       <!-- Fullscreen -->
       <button class="fullscreen-btn" @click="toggleFullscreen" :title="isFullscreen ? 'Exit fullscreen' : 'Fullscreen'">
@@ -239,16 +305,16 @@ watch(() => props.device.status, (newStatus, oldStatus) => {
     <div class="scrcpy-video">
       <canvas ref="canvasRef" class="scrcpy-canvas"></canvas>
       <div v-if="state.error" class="error-overlay">{{ state.error }}</div>
-      <div v-else-if="!state.connected" class="loading-overlay">Connecting...</div>
+      <div v-else-if="!state.connected" class="loading-overlay">{{ t('portable.connecting') }}</div>
 
       <!-- Device info overlay -->
       <div class="device-info-overlay" :class="{ open: showDeviceInfo }">
         <div class="info-row">
-          <span class="info-label">Device</span>
+          <span class="info-label">{{ t('device.device') }}</span>
           <span class="info-value">{{ device.model }}</span>
         </div>
         <div class="info-row" v-if="device.battery_level != null">
-          <span class="info-label">Head Battery</span>
+          <span class="info-label">{{ t('device.headBattery') }}</span>
           <span class="info-value" :style="{ color: batteryColor(device.battery_level) }">
             {{ device.battery_level }}%
             <template v-if="device.battery_plugged">
@@ -257,13 +323,13 @@ watch(() => props.device.status, (newStatus, oldStatus) => {
                 :class="device.battery_weak_charger === false ? 'fast' : 'slow'"
                 :title="device.battery_charging_ma ? `${device.battery_charging_ma}mA` : ''"
               >
-                &#x26A1;{{ device.battery_weak_charger === false ? 'Fast' : 'Slow' }}
+                &#x26A1;{{ device.battery_weak_charger === false ? t('device.fast') : t('device.slow') }}
               </span>
             </template>
           </span>
         </div>
         <div class="info-row" v-if="device.controller_left_battery != null || device.controller_right_battery != null">
-          <span class="info-label">Controller Batteries</span>
+          <span class="info-label">{{ t('device.controllerBatteries') }}</span>
           <span class="info-value controller-batteries">
             <span v-if="device.controller_left_battery != null" :style="{ color: batteryColor(device.controller_left_battery) }">
               L:{{ device.controller_left_battery }}%
@@ -274,60 +340,81 @@ watch(() => props.device.status, (newStatus, oldStatus) => {
           </span>
         </div>
         <div class="info-row" v-if="device.wifi_ssid">
-          <span class="info-label">WiFi</span>
+          <span class="info-label">{{ t('device.wifi') }}</span>
           <span class="info-value">{{ device.wifi_ssid }}</span>
         </div>
         <div class="info-row">
-          <span class="info-label">Provisioned</span>
+          <span class="info-label">{{ t('device.provisioned') }}</span>
           <span class="info-value" :style="{ color: device.provisioned ? 'var(--success)' : 'var(--danger)' }">
-            {{ device.provisioned ? 'Yes' : 'No' }}
+            {{ device.provisioned ? t('device.yes') : t('device.no') }}
           </span>
         </div>
         <div class="info-row">
-          <span class="info-label">App</span>
+          <span class="info-label">{{ t('device.app') }}</span>
           <span class="info-value">
-            {{ device.app_installed ? `v${device.app_version || '?'}` : 'Not installed' }}
+            {{ device.app_installed ? `v${device.app_version || '?'}` : t('device.notInstalled') }}
           </span>
         </div>
         <div class="info-row">
           <span class="info-label">Poranos_LT</span>
           <span class="info-value" :style="{ color: device.app_running ? 'var(--success)' : 'var(--text-secondary)' }">
-            {{ device.app_running ? 'Running' : 'Stopped' }}
+            {{ device.app_running ? t('device.running') : t('device.stopped') }}
           </span>
         </div>
         <div class="info-row" v-if="device.app_account">
-          <span class="info-label">Account</span>
+          <span class="info-label">{{ t('device.account') }}</span>
           <span class="info-value account-value" :title="device.app_account">{{ device.app_account }}</span>
         </div>
         <div class="info-row" v-if="device.storage_total_gb != null">
-          <span class="info-label">Storage</span>
+          <span class="info-label">{{ t('device.storage') }}</span>
           <span class="info-value">
             <span :style="{ color: storageColor }">{{ device.storage_used_gb }}GB</span>
             <span style="color: var(--text-secondary)"> / {{ device.storage_total_gb }}GB</span>
           </span>
         </div>
         <div class="info-row">
-          <span class="info-label">Sync</span>
+          <span class="info-label">{{ t('device.sync') }}</span>
           <span class="info-value" :style="{ color: device.sync_connected ? 'var(--success)' : 'var(--text-secondary)' }">
             <template v-if="device.sync_connected">
-              Connected
+              {{ t('device.connected') }}
               <span class="sync-via-badge" :class="syncViaType">{{ syncViaLabel }}</span>
             </template>
-            <template v-else>Disconnected</template>
+            <template v-else>{{ t('device.disconnected') }}</template>
+          </span>
+        </div>
+        <div class="info-row" v-if="device.app_mode">
+          <span class="info-label">{{ t('device.appMode') }}</span>
+          <span class="info-value" :style="{ color: isMultiplayMode ? 'var(--success)' : 'var(--warning)' }">
+            {{ modeLabel }}
           </span>
         </div>
         <div class="overlay-actions">
           <button
             class="btn btn-account btn-xs"
             :disabled="!device.sync_connected || isAccountSame"
-            :title="isAccountSame ? 'Already set to this account' : 'Set account from logged-in user'"
+            :title="isAccountSame ? t('device.accountSameTitle') : t('device.accountSetTitle')"
             @click="accountChange"
-          >Account Change</button>
+          >{{ t('device.accountChange') }}</button>
+          <button
+            v-if="device.sync_connected && isMultiplayMode"
+            class="btn btn-mode-standalone btn-xs"
+            @click="switchMode('standalone')"
+          >{{ t('device.switchToStandalone') }}</button>
+          <button
+            v-if="device.sync_connected && !isMultiplayMode"
+            class="btn btn-mode-multiplay btn-xs"
+            @click="switchMode('multiplay')"
+          >{{ t('device.switchToMultiplay') }}</button>
           <button
             class="btn btn-warning btn-xs"
             :disabled="device.status !== 'device'"
             @click="showRebootConfirm = true"
-          >Reboot</button>
+          >{{ t('device.reboot') }}</button>
+          <button
+            class="btn btn-danger btn-xs"
+            :disabled="device.status !== 'device'"
+            @click="showShutdownConfirm = true"
+          >{{ t('device.shutdown') }}</button>
         </div>
       </div>
 
@@ -342,17 +429,27 @@ watch(() => props.device.status, (newStatus, oldStatus) => {
 
     <ConfirmModal
       v-if="showRebootConfirm"
-      title="Reboot Device"
-      :message="`${device.model} (${device.serial}) を再起動しますか？`"
-      confirm-label="Reboot"
+      :title="t('device.rebootTitle')"
+      :message="t('device.rebootMsg', { model: device.model, serial: device.serial })"
+      :confirm-label="t('device.reboot')"
       confirm-class="btn-warning"
       @confirm="showRebootConfirm = false; rebootDevice()"
       @cancel="showRebootConfirm = false"
     />
 
     <ConfirmModal
+      v-if="showShutdownConfirm"
+      :title="t('device.shutdownTitle')"
+      :message="t('device.shutdownMsg', { model: device.model, serial: device.serial })"
+      :confirm-label="t('device.shutdown')"
+      confirm-class="btn-danger"
+      @confirm="showShutdownConfirm = false; shutdownDevice()"
+      @cancel="showShutdownConfirm = false"
+    />
+
+    <ConfirmModal
       v-if="accountError"
-      title="通知"
+      :title="t('devices.notify')"
       :message="accountError"
       confirm-label="OK"
       confirm-class="btn-primary"
@@ -494,9 +591,20 @@ watch(() => props.device.status, (newStatus, oldStatus) => {
   padding: 0;
   margin-left: 0.25rem;
 }
-.fullscreen-btn:hover {
+.fullscreen-btn:hover:not(:disabled) {
   background: var(--primary, #4a9eff);
   color: #fff;
+}
+.fullscreen-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.spinning {
+  animation: spin 0.8s linear infinite;
+}
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
 }
 .scrcpy-video {
   background: #000;
@@ -623,6 +731,22 @@ watch(() => props.device.status, (newStatus, oldStatus) => {
 .btn-account:disabled {
   opacity: 0.4;
   cursor: not-allowed;
+}
+.btn-mode-standalone {
+  background: var(--warning, #ff9800);
+  color: #1a1a2e;
+  border-color: var(--warning, #ff9800);
+}
+.btn-mode-standalone:hover:not(:disabled) {
+  opacity: 0.85;
+}
+.btn-mode-multiplay {
+  background: var(--success, #22c55e);
+  color: #fff;
+  border-color: var(--success, #22c55e);
+}
+.btn-mode-multiplay:hover:not(:disabled) {
+  opacity: 0.85;
 }
 .info-toggle-btn {
   display: flex;
